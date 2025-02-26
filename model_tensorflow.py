@@ -2,9 +2,9 @@ import tensorflow as tf
 from tensorflow.keras import layers, models
 from tensorflow.keras.regularizers import l2
 
-def build_lightweight_cnn(input_shape=(128, 128, 3), num_classes=7):
+def build_banana_leaf_cnn(input_shape=(128, 128, 3), num_classes=7):
     """
-    Build a lightweight CNN model using depthwise separable convolutions
+    Build a CNN model for banana leaf classification using the architecture provided
     
     Args:
         input_shape: Input image shape (height, width, channels)
@@ -19,54 +19,58 @@ def build_lightweight_cnn(input_shape=(128, 128, 3), num_classes=7):
     # Input layer
     inputs = layers.Input(shape=input_shape)
     
-    # Initial convolution layer
-    x = layers.Conv2D(16, kernel_size=3, strides=2, padding='same', 
-                     use_bias=False, kernel_regularizer=l2(weight_decay))(inputs)
+    # First convolutional block
+    x = layers.Conv2D(32, kernel_size=3, padding='same', 
+                     kernel_regularizer=l2(weight_decay))(inputs)
     x = layers.BatchNormalization()(x)
-    x = layers.ReLU()(x)
+    x = layers.Activation('relu')(x)
+    x = layers.MaxPooling2D((2, 2))(x)
     
-    # Depthwise separable convolution blocks
-    x = depthwise_separable_block(x, 32, strides=1, weight_decay=weight_decay)
-    x = depthwise_separable_block(x, 64, strides=2, weight_decay=weight_decay)
-    x = depthwise_separable_block(x, 128, strides=2, weight_decay=weight_decay)
-    x = depthwise_separable_block(x, 128, strides=1, weight_decay=weight_decay)
+    # Second convolutional block
+    x = layers.Conv2D(64, kernel_size=3, padding='same',
+                     kernel_regularizer=l2(weight_decay))(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation('relu')(x)
+    x = layers.MaxPooling2D((2, 2))(x)
     
-    # Global average pooling and classifier
-    x = layers.GlobalAveragePooling2D()(x)
-    x = layers.Dropout(0.2)(x)
+    # Third convolutional block
+    x = layers.Conv2D(64, kernel_size=3, padding='same',
+                     kernel_regularizer=l2(weight_decay))(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation('relu')(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+    
+    # Fourth convolutional block
+    x = layers.Conv2D(64, kernel_size=3, padding='same',
+                     kernel_regularizer=l2(weight_decay))(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation('relu')(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+    
+    # Fifth convolutional block
+    x = layers.Conv2D(64, kernel_size=3, padding='same',
+                     kernel_regularizer=l2(weight_decay))(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation('relu')(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+    
+    # Sixth convolutional block
+    x = layers.Conv2D(64, kernel_size=3, padding='same',
+                     kernel_regularizer=l2(weight_decay))(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation('relu')(x)
+    x = layers.MaxPooling2D((2, 2))(x)
+    
+    # Flatten and fully connected layers
+    x = layers.Flatten()(x)
+    x = layers.Dense(64, activation='relu', kernel_regularizer=l2(weight_decay))(x)
+    x = layers.Dropout(0.5)(x)  # Increased dropout for better regularization
     outputs = layers.Dense(num_classes, activation='softmax')(x)
     
     # Create model
     model = models.Model(inputs=inputs, outputs=outputs)
     
     return model
-
-def depthwise_separable_block(x, filters, strides=1, weight_decay=1e-4):
-    """
-    Create a depthwise separable convolution block with batch normalization and ReLU
-    
-    Args:
-        x: Input tensor
-        filters: Number of output filters
-        strides: Stride for the depthwise convolution
-        weight_decay: Weight decay factor for regularization
-        
-    Returns:
-        Output tensor after applying the depthwise separable convolution block
-    """
-    # Depthwise convolution
-    x = layers.DepthwiseConv2D(kernel_size=3, strides=strides, padding='same',
-                              use_bias=False, kernel_regularizer=l2(weight_decay))(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.ReLU()(x)
-    
-    # Pointwise convolution
-    x = layers.Conv2D(filters, kernel_size=1, strides=1, padding='same',
-                     use_bias=False, kernel_regularizer=l2(weight_decay))(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.ReLU()(x)
-    
-    return x
 
 def get_model(input_shape=(128, 128, 3), num_classes=7):
     """
@@ -79,7 +83,7 @@ def get_model(input_shape=(128, 128, 3), num_classes=7):
     Returns:
         A compiled Keras model
     """
-    model = build_lightweight_cnn(input_shape=input_shape, num_classes=num_classes)
+    model = build_banana_leaf_cnn(input_shape=input_shape, num_classes=num_classes)
     
     # Compile model
     model.compile(

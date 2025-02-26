@@ -2,51 +2,52 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class DepthwiseSeparableConv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1):
-        super(DepthwiseSeparableConv, self).__init__()
-        self.depthwise = nn.Conv2d(
-            in_channels, in_channels, kernel_size=kernel_size, 
-            stride=stride, padding=padding, groups=in_channels, bias=False
-        )
-        self.pointwise = nn.Conv2d(
-            in_channels, out_channels, kernel_size=1, stride=1, padding=0, bias=False
-        )
-        
-    def forward(self, x):
-        x = self.depthwise(x)
-        x = self.pointwise(x)
-        return x
-
-class LightweightCNN(nn.Module):
+class BananaLeafCNN(nn.Module):
     def __init__(self, num_classes=7):
-        super(LightweightCNN, self).__init__()
+        super(BananaLeafCNN, self).__init__()
         
-        # Initial convolution layer
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(16)
+        # First convolutional block
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
         
-        # Depthwise separable convolution blocks
-        self.conv_block1 = self._make_conv_block(16, 32, stride=1)
-        self.conv_block2 = self._make_conv_block(32, 64, stride=2)
-        self.conv_block3 = self._make_conv_block(64, 128, stride=2)
-        self.conv_block4 = self._make_conv_block(128, 128, stride=1)
+        # Second convolutional block
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
+        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
         
-        # Global average pooling and classifier
-        self.global_pool = nn.AdaptiveAvgPool2d(1)
-        self.dropout = nn.Dropout(0.2)
-        self.fc = nn.Linear(128, num_classes)
+        # Third convolutional block
+        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm2d(64)
+        self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2)
+        
+        # Fourth convolutional block
+        self.conv4 = nn.Conv2d(64, 64, kernel_size=3, padding=1)
+        self.bn4 = nn.BatchNorm2d(64)
+        self.pool4 = nn.MaxPool2d(kernel_size=2, stride=2)
+        
+        # Fifth convolutional block
+        self.conv5 = nn.Conv2d(64, 64, kernel_size=3, padding=1)
+        self.bn5 = nn.BatchNorm2d(64)
+        self.pool5 = nn.MaxPool2d(kernel_size=2, stride=2)
+        
+        # Sixth convolutional block
+        self.conv6 = nn.Conv2d(64, 64, kernel_size=3, padding=1)
+        self.bn6 = nn.BatchNorm2d(64)
+        self.pool6 = nn.MaxPool2d(kernel_size=2, stride=2)
+        
+        # Calculate the size after all convolutions and pooling
+        # For 128x128 input, after 6 pooling layers (each dividing by 2), we get 2x2 feature maps
+        self.flatten_size = 64 * 2 * 2
+        
+        # Fully connected layers
+        self.fc1 = nn.Linear(self.flatten_size, 64)
+        self.dropout = nn.Dropout(0.5)  # Increased dropout for better regularization
+        self.fc2 = nn.Linear(64, num_classes)
         
         # Initialize weights
         self._initialize_weights()
         
-    def _make_conv_block(self, in_channels, out_channels, stride):
-        layers = []
-        layers.append(DepthwiseSeparableConv(in_channels, out_channels, stride=stride))
-        layers.append(nn.BatchNorm2d(out_channels))
-        layers.append(nn.ReLU(inplace=True))
-        return nn.Sequential(*layers)
-    
     def _initialize_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -61,28 +62,56 @@ class LightweightCNN(nn.Module):
                 nn.init.zeros_(m.bias)
     
     def forward(self, x):
-        # Initial convolution
+        # First block
         x = self.conv1(x)
         x = self.bn1(x)
         x = F.relu(x)
+        x = self.pool1(x)
         
-        # Depthwise separable convolution blocks
-        x = self.conv_block1(x)
-        x = self.conv_block2(x)
-        x = self.conv_block3(x)
-        x = self.conv_block4(x)
+        # Second block
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x = F.relu(x)
+        x = self.pool2(x)
         
-        # Global average pooling and classifier
-        x = self.global_pool(x)
+        # Third block
+        x = self.conv3(x)
+        x = self.bn3(x)
+        x = F.relu(x)
+        x = self.pool3(x)
+        
+        # Fourth block
+        x = self.conv4(x)
+        x = self.bn4(x)
+        x = F.relu(x)
+        x = self.pool4(x)
+        
+        # Fifth block
+        x = self.conv5(x)
+        x = self.bn5(x)
+        x = F.relu(x)
+        x = self.pool5(x)
+        
+        # Sixth block
+        x = self.conv6(x)
+        x = self.bn6(x)
+        x = F.relu(x)
+        x = self.pool6(x)
+        
+        # Flatten
         x = x.view(x.size(0), -1)
+        
+        # Fully connected layers
+        x = self.fc1(x)
+        x = F.relu(x)
         x = self.dropout(x)
-        x = self.fc(x)
+        x = self.fc2(x)
         
         return x
 
 # Function to get model
 def get_model(num_classes=7):
-    return LightweightCNN(num_classes=num_classes)
+    return BananaLeafCNN(num_classes=num_classes)
 
 # Function to count parameters
 def count_parameters(model):
