@@ -2,8 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from cell1_imports_and_constants import NUM_CLASSES
+
 class BananaLeafCNN(nn.Module):
-    def __init__(self, num_classes=7):
+    def __init__(self, num_classes=NUM_CLASSES):
         super(BananaLeafCNN, self).__init__()
         
         # First convolutional block
@@ -37,12 +39,12 @@ class BananaLeafCNN(nn.Module):
         self.pool6 = nn.MaxPool2d(kernel_size=2, stride=2)
         
         # Calculate the size after all convolutions and pooling
-        # For 128x128 input, after 6 pooling layers (each dividing by 2), we get 2x2 feature maps
-        self.flatten_size = 64 * 2 * 2
+        # For 224x224 input, after 6 pooling layers (each dividing by 2), we get 3x3 feature maps
+        self.flatten_size = 64 * 3 * 3
         
         # Fully connected layers
         self.fc1 = nn.Linear(self.flatten_size, 64)
-        self.dropout = nn.Dropout(0.5)  # Increased dropout for better regularization
+        self.dropout = nn.Dropout(0.5)  # Added dropout for regularization
         self.fc2 = nn.Linear(64, num_classes)
         
         # Initialize weights
@@ -110,23 +112,15 @@ class BananaLeafCNN(nn.Module):
         return x
 
 # Function to get model
-def get_model(num_classes=7):
+def get_model(num_classes=NUM_CLASSES):
     return BananaLeafCNN(num_classes=num_classes)
 
 # Function to count parameters
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-# Test the model
-if __name__ == "__main__":
-    model = get_model()
-    x = torch.randn(1, 3, 128, 128)
-    y = model(x)
-    print(f"Input shape: {x.shape}")
-    print(f"Output shape: {y.shape}")
-    print(f"Number of parameters: {count_parameters(model):,}")
-    
-    # Calculate model size in MB
+# Calculate model size in MB
+def get_model_size(model):
     param_size = 0
     for param in model.parameters():
         param_size += param.nelement() * param.element_size()
@@ -135,4 +129,4 @@ if __name__ == "__main__":
         buffer_size += buffer.nelement() * buffer.element_size()
     
     size_all_mb = (param_size + buffer_size) / 1024**2
-    print(f"Model size: {size_all_mb:.2f} MB") 
+    return size_all_mb 
