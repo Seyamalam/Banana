@@ -1,8 +1,10 @@
 import torch
 import torch.nn as nn
+import torchvision.models as models
 from torchvision.models import get_model, get_model_weights
 import torchvision.transforms as transforms
-from cell1_imports_and_constants import IMAGE_SIZE, NUM_CLASSES, CLASS_NAMES
+from cell1_imports_and_constants import IMG_SIZE, NUM_CLASSES, CLASS_NAMES
+from typing import Optional
 
 def get_available_classification_models():
     """
@@ -60,16 +62,16 @@ def create_model_adapter(model_name, pretrained=True, freeze_backbone=False):
         else:
             # Fallback to standard transforms
             input_transforms = transforms.Compose([
-                transforms.Resize(IMAGE_SIZE),
-                transforms.CenterCrop(IMAGE_SIZE),
+                transforms.Resize(IMG_SIZE),
+                transforms.CenterCrop(IMG_SIZE),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
             ])
     else:
         # Standard transforms for non-pretrained models
         input_transforms = transforms.Compose([
-            transforms.Resize(IMAGE_SIZE),
-            transforms.CenterCrop(IMAGE_SIZE),
+            transforms.Resize(IMG_SIZE),
+            transforms.CenterCrop(IMG_SIZE),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
