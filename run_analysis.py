@@ -4,6 +4,9 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
 
 # Import modules
 from cell1_imports_and_constants import set_seed, NUM_CLASSES
@@ -13,7 +16,7 @@ from cell4_training import train, validate
 from cell6_utils import save_checkpoint, load_checkpoint, evaluate_model
 from cell11_training_resources import measure_training_resources, compare_training_resources
 from cell12_statistical_testing import statistical_significance_test, mcnemar_test
-from cell13_efficiency_metrics import calculate_advanced_efficiency_metrics, calculate_pareto_frontier
+from cell13_efficiency_metrics import calculate_advanced_efficiency_metrics, calculate_pareto_frontier, calculate_model_size
 from cell14_ablation_studies import AblationStudy, create_model_variant, change_dropout_rate, change_activation
 from cell15_flops_analysis import calculate_flops, compare_model_flops, analyze_layer_distribution
 from cell16_robustness_testing import RobustnessTest, compare_model_robustness
@@ -38,7 +41,8 @@ from cell5_visualization import (
     plot_precision_recall_curve,
     visualize_model_architecture,
     plot_training_metrics,
-    plot_class_distribution
+    plot_class_distribution,
+    save_figure
 )
 
 
@@ -335,7 +339,6 @@ def run_efficiency_metrics(models, model_names, results, args):
     
     for i, (model, model_name) in enumerate(zip(models, model_names)):
         # Get model size
-        from cell13_efficiency_metrics import calculate_model_size
         model_size = calculate_model_size(model)
         
         # Get inference time (placeholder - should be measured properly)
@@ -459,7 +462,11 @@ def main():
         
         # Compare training resources
         if len(training_metrics) > 1:
-            csv_path, plot_path = compare_training_resources(training_metrics)
+            print("Generating training resource comparison visualizations...")
+            csv_path, plot_path = compare_training_resources(
+                training_metrics,
+                output_dir=os.path.join(args.output_dir, 'comparisons')
+            )
             print(f"Training resource comparison saved to {csv_path}")
     else:
         # Load pre-trained models
@@ -564,8 +571,25 @@ def main():
         print("\n" + "="*80)
         print("RUNNING ROBUSTNESS TESTS")
         print("="*80)
+        robustness_results = []
         for model, model_name in zip(models, model_names):
-            robustness_results = run_robustness_tests(model, model_name, test_loader, args)
+            test_results = run_robustness_tests(model, model_name, test_loader, args)
+            robustness_results.append({'name': model_name, 'model': model, 'results': test_results})
+        
+        # Compare model robustness if we have multiple models
+        if len(robustness_results) > 1:
+            print("\nComparing model robustness...")
+            for perturbation_type in ['gaussian_noise', 'blur', 'brightness', 'contrast', 'rotation', 'occlusion', 'jpeg_compression']:
+                try:
+                    comparison_df, comparison_csv, comparison_plot = compare_model_robustness(
+                        [{'name': r['name'], 'model': r['model']} for r in robustness_results],
+                        test_loader,
+                        perturbation_type=perturbation_type,
+                        output_dir=os.path.join(args.output_dir, 'robustness', 'comparisons')
+                    )
+                    print(f"Robustness comparison for {perturbation_type} saved to {comparison_csv}")
+                except Exception as e:
+                    print(f"Warning: Could not generate robustness comparison for {perturbation_type}: {e}")
     
     # Run deployment metrics
     if args.deployment or args.all:
@@ -579,10 +603,11 @@ def main():
         
         # Compare deployment metrics
         if len(deployment_results) > 1:
+            print("\nComparing deployment metrics...")
             model_list = [{'name': name, 'model': model} for name, model in zip(model_names, models)]
             df, csv_path, plot_path = compare_deployment_metrics(
                 model_list,
-                output_dir=os.path.join(args.output_dir, 'deployment')
+                output_dir=os.path.join(args.output_dir, 'deployment', 'comparisons')
             )
             print(f"Deployment metrics comparison saved to {csv_path}")
     
@@ -592,6 +617,123 @@ def main():
         print("RUNNING EFFICIENCY METRICS")
         print("="*80)
         efficiency_results = run_efficiency_metrics(models, model_names, evaluation_results, args)
+    
+    # Generate final comparison summary
+    if len(models) > 1:
+        print("\n" + "="*80)
+        print("GENERATING OVERALL MODEL COMPARISON")
+        print("="*80)
+        
+        # Create comparison directory
+        comparison_dir = os.path.join(args.output_dir, 'comparisons')
+        os.makedirs(comparison_dir, exist_ok=True)
+        
+        # Build comparison dataframe with key metrics
+        comparison_data = []
+        for i, (model, model_name) in enumerate(zip(models, model_names)):
+            model_data = {
+                'Model': model_name,
+                'Accuracy': evaluation_results[i]['accuracy'] if i < len(evaluation_results) else 0,
+                'F1 Score': evaluation_results[i]['f1'] if i < len(evaluation_results) else 0,
+                'Parameters': sum(p.numel() for p in model.parameters() if p.requires_grad),
+                'Size (MB)': calculate_model_size(model)
+            }
+            comparison_data.append(model_data)
+        
+        comparison_df = pd.DataFrame(comparison_data)
+        
+        # Save to CSV
+        comparison_csv = os.path.join(comparison_dir, "model_comparison_summary.csv")
+        comparison_df.to_csv(comparison_csv, index=False)
+        
+        # Create bar charts for key metrics
+        metrics_to_plot = ['Accuracy', 'F1 Score', 'Parameters', 'Size (MB)']
+        for metric in metrics_to_plot:
+            plt.figure(figsize=(10, 6))
+            plt.bar(comparison_df['Model'], comparison_df[metric])
+            plt.xlabel('Model')
+            plt.ylabel(metric)
+            plt.title(f'Comparison of {metric} Across Models')
+            plt.xticks(rotation=45, ha='right')
+            plt.tight_layout()
+            
+            # Save figure
+            metric_name = metric.lower().replace(' ', '_').replace('(', '').replace(')', '')
+            save_path = os.path.join(comparison_dir, f"comparison_{metric_name}")
+            save_figure(plt, save_path, formats=['png', 'svg'])
+        
+        print(f"Overall model comparison saved to {comparison_csv}")
+        
+        # Add per-class performance comparison
+        if args.evaluate or args.all:
+            try:
+                print("\nGenerating per-class performance comparison...")
+                from cell1_imports_and_constants import IDX_TO_CLASS
+                
+                # Prepare data for per-class comparison
+                class_names = list(IDX_TO_CLASS.values())
+                model_names_list = model_names.copy()
+                
+                # Calculate per-class metrics for each model
+                per_class_data = {}
+                
+                for result in evaluation_results:
+                    model_name = result['name']
+                    y_true = result['y_true']
+                    y_pred = result['y_pred']
+                    
+                    # Calculate per-class accuracy
+                    per_class_acc = []
+                    for class_idx in range(len(class_names)):
+                        # Find indices where true label is this class
+                        indices = [i for i, label in enumerate(y_true) if label == class_idx]
+                        
+                        if indices:
+                            # Calculate accuracy for this class
+                            correct = sum(1 for i in indices if y_pred[i] == y_true[i])
+                            class_acc = correct / len(indices)
+                        else:
+                            class_acc = 0
+                        
+                        per_class_acc.append(class_acc)
+                    
+                    per_class_data[model_name] = per_class_acc
+                
+                # Convert to DataFrame
+                per_class_df = pd.DataFrame(per_class_data, index=class_names)
+                
+                # Save to CSV
+                per_class_csv = os.path.join(comparison_dir, "per_class_accuracy_comparison.csv")
+                per_class_df.to_csv(per_class_csv)
+                
+                # Create heatmap
+                plt.figure(figsize=(12, 8))
+                sns.heatmap(per_class_df, annot=True, cmap='Blues', fmt='.2f')
+                plt.title('Per-Class Accuracy Comparison')
+                plt.tight_layout()
+                
+                # Save heatmap
+                heatmap_path = os.path.join(comparison_dir, "per_class_accuracy_heatmap")
+                save_figure(plt, heatmap_path, formats=['png', 'svg'])
+                
+                # Create bar chart for each class
+                for class_idx, class_name in enumerate(class_names):
+                    plt.figure(figsize=(10, 6))
+                    class_accuracies = [per_class_data[model_name][class_idx] for model_name in model_names_list]
+                    plt.bar(model_names_list, class_accuracies)
+                    plt.xlabel('Model')
+                    plt.ylabel('Accuracy')
+                    plt.title(f'Accuracy for Class: {class_name}')
+                    plt.xticks(rotation=45, ha='right')
+                    plt.tight_layout()
+                    
+                    # Save figure
+                    class_path = os.path.join(comparison_dir, f"class_{class_name.replace(' ', '_')}_comparison")
+                    save_figure(plt, class_path, formats=['png', 'svg'])
+                
+                print(f"Per-class comparison saved to {per_class_csv}")
+            except Exception as e:
+                print(f"Warning: Could not generate per-class comparison: {e}")
     
     print("\n" + "="*80)
     print("ANALYSIS COMPLETE!")
