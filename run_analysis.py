@@ -37,8 +37,8 @@ from cell5_visualization import (
     plot_confusion_matrix, 
     visualize_predictions, 
     save_classification_report, 
-    plot_roc_curve, 
-    plot_precision_recall_curve,
+    plot_roc_curves, 
+    plot_precision_recall_curves,
     visualize_model_architecture,
     plot_training_metrics,
     plot_class_distribution,
@@ -236,34 +236,14 @@ def evaluate_models(models, model_names, test_loader, args):
         except Exception as e:
             print(f"Warning: Could not visualize predictions: {e}")
             
-        # Generate ROC curve and precision-recall curve if we have probabilities
+        # Generate ROC curve
         try:
-            # Get probabilities for a batch of test data
-            all_probs = []
-            all_labels = []
-            with torch.no_grad():
-                for batch_images, batch_labels in test_loader:
-                    batch_images = batch_images.to(device)
-                    outputs = model(batch_images)
-                    probs = torch.nn.functional.softmax(outputs, dim=1)
-                    all_probs.extend(probs.cpu().numpy())
-                    all_labels.extend(batch_labels.numpy())
-                    
-                    # Limit to max 1000 samples for efficiency
-                    if len(all_probs) > 1000:
-                        break
-            
-            # Convert to numpy arrays
-            all_probs = np.array(all_probs)
-            all_labels = np.array(all_labels)
-            
-            # Generate ROC curve
             roc_path = os.path.join(eval_dir, f"{model_name}_roc_curve")
-            plot_roc_curve(all_probs, all_labels, roc_path, formats=['png', 'svg'])
+            plot_roc_curves(model, test_loader, device, save_path=roc_path, formats=['png', 'svg'])
             
             # Generate precision-recall curve
             pr_path = os.path.join(eval_dir, f"{model_name}_precision_recall_curve")
-            plot_precision_recall_curve(all_probs, all_labels, pr_path, formats=['png', 'svg'])
+            plot_precision_recall_curves(model, test_loader, device, save_path=pr_path, formats=['png', 'svg'])
         except Exception as e:
             print(f"Warning: Could not generate ROC or PR curves: {e}")
         
