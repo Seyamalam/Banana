@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 # Import modules
-from cell1_imports_and_constants import set_seed
+from cell1_imports_and_constants import set_seed, NUM_CLASSES
 from cell2_dataset import load_data
 from cell3_model import BananaLeafCNN
 from cell4_training import train, validate
@@ -24,7 +24,9 @@ from cell8_model_zoo import (
     build_mobilenet_v2, 
     build_efficientnet_b0, 
     build_resnet18, 
-    build_shufflenet_v2
+    build_shufflenet_v2,
+    get_available_classification_models,
+    create_model_adapter
 )
 
 
@@ -48,8 +50,12 @@ def parse_args():
     parser.add_argument('--all', action='store_true', help='Run all analyses')
     
     # Model selection
+    available_models = ['banana_leaf_cnn'] + get_available_classification_models() + ['mobilenet_v2', 'efficientnet_b0', 'resnet18', 'shufflenet_v2']
+    # Remove duplicates while preserving order
+    available_models = list(dict.fromkeys(available_models))
+    
     parser.add_argument('--models', nargs='+', default=['banana_leaf_cnn'], 
-                        choices=['banana_leaf_cnn', 'mobilenet_v2', 'efficientnet_b0', 'resnet18', 'shufflenet_v2'],
+                        choices=available_models,
                         help='Models to analyze')
     
     args = parser.parse_args()
@@ -164,52 +170,6 @@ def evaluate_models(models, model_names, test_loader, args):
         print(f"McNemar test results saved to {mcnemar_csv}")
     
     return results
-
-
-def run_ablation_studies(model, model_name, train_loader, val_loader, args):
-    """Run ablation studies on model components."""
-    print(f"Running ablation studies for {model_name}...")
-    
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    # Create ablation study
-    ablation_study = AblationStudy(
-        base_model=model,
-        model_name=model_name,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        epochs=10,  # Use fewer epochs for ablation
-        device=device,
-        output_dir=os.path.join(args.output_dir, 'ablation')
-    )
-    
-    # Create model variants
-    variants = [
-        create_model_variant(
-            model, 
-            lambda m: change_dropout_rate(m, 0.3),
-            f"{model_name}_dropout_0.3",
-            "Dropout rate changed to 0.3"
-        ),
-        create_model_variant(
-            model, 
-            lambda m: change_dropout_rate(m, 0.7),
-            f"{model_name}_dropout_0.7",
-            "Dropout rate changed to 0.7"
-        ),
-        create_model_variant(
-            model, 
-            lambda m: change_activation(m, 'leaky_relu'),
-            f"{model_name}_leaky_relu",
-            "ReLU activation changed to LeakyReLU"
-        )
-    ]
-    
-    # Run ablation studies
-    results_df = ablation_study.run_ablation_studies(variants)
-    print(f"Ablation study results saved to {os.path.join(args.output_dir, 'ablation')}")
-    
-    return results_df
 
 
 def run_robustness_tests(model, model_name, test_loader, args):
@@ -354,13 +314,20 @@ def main():
         if model_name == 'banana_leaf_cnn':
             model = BananaLeafCNN()
         elif model_name == 'mobilenet_v2':
-            model = build_mobilenet_v2(num_classes=6)
+            model = build_mobilenet_v2(num_classes=NUM_CLASSES)
         elif model_name == 'efficientnet_b0':
-            model = build_efficientnet_b0(num_classes=6)
+            model = build_efficientnet_b0(num_classes=NUM_CLASSES)
         elif model_name == 'resnet18':
-            model = build_resnet18(num_classes=6)
+            model = build_resnet18(num_classes=NUM_CLASSES)
         elif model_name == 'shufflenet_v2':
-            model = build_shufflenet_v2(num_classes=6)
+            model = build_shufflenet_v2(num_classes=NUM_CLASSES)
+        else:
+            # Other models from the model zoo
+            model_adapter, _ = create_model_adapter(model_name, pretrained=True, freeze_backbone=False)
+            if model_adapter is None:
+                print(f"Warning: Failed to create model {model_name}. Skipping.")
+                continue
+            model = model_adapter
         
         models.append(model)
         model_names.append(model_name)
@@ -416,8 +383,66 @@ def main():
         print("\n" + "="*80)
         print("RUNNING ABLATION STUDIES")
         print("="*80)
-        for model, model_name in zip(models, model_names):
-            ablation_results = run_ablation_studies(model, model_name, train_loader, val_loader, args)
+        
+        # Get trained models (first try to load checkpoints)
+        trained_models = []
+        trained_model_names = []
+        
+        for i, (model, model_name) in enumerate(zip(models, model_names)):
+            checkpoint_path = os.path.join(args.output_dir, f"{model_name}_best.pt")
+            if os.path.exists(checkpoint_path):
+                print(f"Using trained model {model_name} from {checkpoint_path} for ablation")
+                model, _, _, _ = load_checkpoint(model, None, checkpoint_path)
+                trained_models.append(model)
+                trained_model_names.append(model_name)
+            elif args.train or args.all:
+                # If we just trained this model, use it
+                print(f"Using freshly trained model {model_name} for ablation")
+                trained_models.append(model)
+                trained_model_names.append(model_name)
+            else:
+                print(f"Skipping ablation for {model_name} (no trained model found)")
+        
+        # Only run ablation on trained models
+        ablation_epochs = min(10, args.epochs)  # Use fewer epochs for ablation
+        for model, model_name in zip(trained_models, trained_model_names):
+            print(f"Running ablation studies for {model_name}...")
+            # Create ablation study with fewer epochs
+            ablation_study = AblationStudy(
+                base_model=model,
+                model_name=model_name,
+                train_loader=train_loader,
+                val_loader=val_loader,
+                epochs=ablation_epochs,
+                device='cuda' if torch.cuda.is_available() else 'cpu',
+                output_dir=os.path.join(args.output_dir, 'ablation')
+            )
+            
+            # Create model variants
+            variants = [
+                create_model_variant(
+                    model, 
+                    lambda m: change_dropout_rate(m, 0.3),
+                    f"{model_name}_dropout_0.3",
+                    "Dropout rate changed to 0.3"
+                ),
+                create_model_variant(
+                    model, 
+                    lambda m: change_dropout_rate(m, 0.7),
+                    f"{model_name}_dropout_0.7",
+                    "Dropout rate changed to 0.7"
+                ),
+                create_model_variant(
+                    model, 
+                    lambda m: change_activation(m, 'leaky_relu'),
+                    f"{model_name}_leaky_relu",
+                    "ReLU activation changed to LeakyReLU"
+                )
+            ]
+            
+            # Run ablation studies
+            results_df = ablation_study.run_ablation_studies(variants)
+            print(f"Ablation study results saved to {os.path.join(args.output_dir, 'ablation')}")
     
     # Run robustness tests
     if args.robustness or args.all:

@@ -9,6 +9,7 @@ from typing import Dict, List, Tuple, Optional, Union, Any, Callable
 from cell5_visualization import save_figure
 from cell4_training import train, validate
 from cell11_training_resources import measure_training_resources
+from torchvision import models
 
 
 class AblationStudy:
@@ -339,9 +340,176 @@ def create_model_variant(
     Returns:
         Dictionary with variant information
     """
-    # Create a deep copy of the base model
-    variant_model = type(base_model)()  # Create a new instance
-    variant_model.load_state_dict(base_model.state_dict())
+    # For MobileNetV2 and similar pre-trained models, we need to handle them separately
+    if type(base_model).__name__ == 'MobileNetV2':
+        # Create a new model with the same number of classes
+        num_classes = base_model.classifier[1].out_features
+        variant_model = models.mobilenet_v2(weights=None)
+        
+        # Modify the classifier to match the number of classes
+        in_features = variant_model.classifier[1].in_features
+        variant_model.classifier[1] = nn.Linear(in_features, num_classes)
+        
+        # Copy compatible weights (excluding the classifier)
+        base_dict = base_model.state_dict()
+        variant_dict = variant_model.state_dict()
+        
+        # Filter out classifier weights
+        filtered_dict = {k: v for k, v in base_dict.items() if k in variant_dict and 'classifier.1' not in k}
+        
+        # Update with compatible weights
+        variant_dict.update(filtered_dict)
+        variant_model.load_state_dict(variant_dict)
+        
+        # Now copy the classifier weights separately
+        variant_model.classifier[1].weight.data.copy_(base_model.classifier[1].weight.data)
+        variant_model.classifier[1].bias.data.copy_(base_model.classifier[1].bias.data)
+    
+    # For ResNet and similar models
+    elif 'ResNet' in type(base_model).__name__:
+        num_classes = base_model.fc.out_features
+        
+        # Directly call the correct model function instead of using getattr
+        if '18' in type(base_model).__name__:
+            variant_model = models.resnet18(weights=None)
+        elif '34' in type(base_model).__name__:
+            variant_model = models.resnet34(weights=None)
+        elif '50' in type(base_model).__name__:
+            variant_model = models.resnet50(weights=None)
+        elif '101' in type(base_model).__name__:
+            variant_model = models.resnet101(weights=None)
+        elif '152' in type(base_model).__name__:
+            variant_model = models.resnet152(weights=None)
+        else:
+            # Default to resnet18 if we can't determine the specific variant
+            variant_model = models.resnet18(weights=None)
+        
+        # Modify fc layer
+        in_features = variant_model.fc.in_features
+        variant_model.fc = nn.Linear(in_features, num_classes)
+        
+        # Copy compatible weights
+        base_dict = base_model.state_dict()
+        variant_dict = variant_model.state_dict()
+        
+        # Filter out fc weights
+        filtered_dict = {k: v for k, v in base_dict.items() if k in variant_dict and 'fc' not in k}
+        
+        # Update with compatible weights
+        variant_dict.update(filtered_dict)
+        variant_model.load_state_dict(variant_dict)
+        
+        # Copy fc weights separately
+        variant_model.fc.weight.data.copy_(base_model.fc.weight.data)
+        variant_model.fc.bias.data.copy_(base_model.fc.bias.data)
+    
+    # For EfficientNet models
+    elif 'EfficientNet' in type(base_model).__name__:
+        num_classes = base_model.classifier[-1].out_features
+        
+        # Use direct model creation instead of getattr
+        if 'b0' in type(base_model).__name__.lower():
+            variant_model = models.efficientnet_b0(weights=None)
+        elif 'b1' in type(base_model).__name__.lower():
+            variant_model = models.efficientnet_b1(weights=None)
+        elif 'b2' in type(base_model).__name__.lower():
+            variant_model = models.efficientnet_b2(weights=None)
+        elif 'b3' in type(base_model).__name__.lower():
+            variant_model = models.efficientnet_b3(weights=None)
+        else:
+            # Default to b0 if we can't determine the specific variant
+            variant_model = models.efficientnet_b0(weights=None)
+        
+        # Modify classifier
+        in_features = variant_model.classifier[-1].in_features
+        variant_model.classifier[-1] = nn.Linear(in_features, num_classes)
+        
+        # Copy compatible weights
+        base_dict = base_model.state_dict()
+        variant_dict = variant_model.state_dict()
+        
+        # Filter out classifier weights
+        filtered_dict = {k: v for k, v in base_dict.items() if k in variant_dict and 'classifier.1' not in k}
+        
+        # Update with compatible weights
+        variant_dict.update(filtered_dict)
+        
+        try:
+            variant_model.load_state_dict(variant_dict)
+            # Copy classifier weights separately
+            variant_model.classifier[-1].weight.data.copy_(base_model.classifier[-1].weight.data)
+            variant_model.classifier[-1].bias.data.copy_(base_model.classifier[-1].bias.data)
+        except Exception as e:
+            print(f"Warning: Could not load state dict for EfficientNet: {e}")
+            print("Using fresh weights for EfficientNet")
+    
+    # For models wrapped in ModelAdapter
+    elif hasattr(base_model, 'model') and hasattr(base_model, 'model_name'):
+        # This is a model adapter from the model zoo
+        wrapped_model = base_model.model
+        model_name = base_model.model_name
+        
+        # Create a new instance with the same architecture via create_model_adapter
+        from cell8_model_zoo import create_model_adapter
+        new_adapter, _ = create_model_adapter(model_name, pretrained=False)
+        
+        if new_adapter is None:
+            print(f"Warning: Could not create a new instance of {model_name}")
+            # Try to use the deepcopy approach as fallback
+            import copy
+            variant_model = copy.deepcopy(base_model)
+        else:
+            # We have a new model with the right architecture
+            variant_model = new_adapter
+            
+            # Try to copy weights
+            try:
+                # For the wrapped model
+                if hasattr(variant_model, 'model') and hasattr(base_model, 'model'):
+                    variant_model.model.load_state_dict(base_model.model.state_dict())
+                # Direct copy if that fails
+                else:
+                    variant_model.load_state_dict(base_model.state_dict())
+            except Exception as e:
+                print(f"Warning: Could not copy weights for {model_name}: {e}")
+                print("Using fresh weights for the model")
+    
+    # For ShuffleNet models
+    elif 'ShuffleNet' in type(base_model).__name__:
+        num_classes = base_model.fc.out_features
+        variant_model = models.shufflenet_v2_x1_0(weights=None)
+        
+        # Modify fc layer
+        in_features = variant_model.fc.in_features
+        variant_model.fc = nn.Linear(in_features, num_classes)
+        
+        # Try to copy compatible weights
+        try:
+            base_dict = base_model.state_dict()
+            variant_dict = variant_model.state_dict()
+            
+            # Filter out fc weights
+            filtered_dict = {k: v for k, v in base_dict.items() if k in variant_dict and 'fc' not in k}
+            
+            # Update with compatible weights
+            variant_dict.update(filtered_dict)
+            variant_model.load_state_dict(variant_dict)
+            
+            # Copy fc weights separately
+            variant_model.fc.weight.data.copy_(base_model.fc.weight.data)
+            variant_model.fc.bias.data.copy_(base_model.fc.bias.data)
+        except Exception as e:
+            print(f"Warning: Could not load state dict for ShuffleNet: {e}")
+            print("Using fresh weights for ShuffleNet")
+    
+    # For custom models like BananaLeafCNN
+    else:
+        variant_model = type(base_model)()  # Create a new instance
+        try:
+            variant_model.load_state_dict(base_model.state_dict())
+        except Exception as e:
+            print(f"Warning: Could not load state dict for {variant_name}: {e}")
+            print("Using fresh weights for the model")
     
     # Apply modification
     modified_model = modification_fn(variant_model)
