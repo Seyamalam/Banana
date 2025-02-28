@@ -174,6 +174,215 @@ def train_model(model, model_name, train_loader, val_loader, args):
     return training_metrics
 
 
+def compare_confusion_matrices(results, output_dir):
+    """
+    Create a side-by-side comparison of confusion matrices for all models.
+    
+    Args:
+        results: List of evaluation result dictionaries
+        output_dir: Directory to save comparison visualizations
+    """
+    print("Generating confusion matrix comparison...")
+    
+    # Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Get class names
+    from cell1_imports_and_constants import IDX_TO_CLASS
+    class_names = [IDX_TO_CLASS[i] for i in range(len(IDX_TO_CLASS))]
+    
+    # Determine grid size for the plot
+    num_models = len(results)
+    ncols = min(3, num_models)  # Maximum 3 columns
+    nrows = (num_models + ncols - 1) // ncols  # Ceiling division
+    
+    # Create figure
+    fig = plt.figure(figsize=(ncols * 5, nrows * 4))
+    
+    # Plot each confusion matrix
+    for i, result in enumerate(results):
+        model_name = result['name']
+        cm = result['confusion_matrix']
+        
+        # Normalize confusion matrix
+        cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        
+        # Add subplot
+        ax = fig.add_subplot(nrows, ncols, i + 1)
+        
+        # Create heatmap
+        sns.heatmap(cm_norm, annot=True, fmt='.2f', cmap='Blues',
+                    xticklabels=class_names, yticklabels=class_names, ax=ax)
+        
+        ax.set_xlabel('Predicted')
+        ax.set_ylabel('True')
+        ax.set_title(f'Confusion Matrix: {model_name}')
+        plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+    
+    plt.tight_layout()
+    
+    # Save figure
+    comparison_path = os.path.join(output_dir, "confusion_matrix_comparison")
+    png_path, svg_path = save_figure(plt, comparison_path, formats=['png', 'svg'])
+    
+    print(f"Confusion matrix comparison saved to {png_path}")
+    
+    # Return path to saved figure
+    return png_path
+
+
+def compare_classification_metrics(results, output_dir):
+    """
+    Create visualizations comparing classification metrics (precision, recall, F1) across models.
+    
+    Args:
+        results: List of evaluation result dictionaries
+        output_dir: Directory to save comparison visualizations
+    """
+    print("Generating classification metrics comparison...")
+    
+    # Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Get class names
+    from cell1_imports_and_constants import IDX_TO_CLASS
+    class_names = [IDX_TO_CLASS[i] for i in range(len(IDX_TO_CLASS))]
+    num_classes = len(class_names)
+    
+    # Prepare data for each model
+    model_names = [result['name'] for result in results]
+    
+    # Calculate per-class precision, recall, and F1 for each model
+    from sklearn.metrics import precision_recall_fscore_support
+    
+    metrics_data = []
+    
+    for result in results:
+        model_name = result['name']
+        y_true = result['y_true']
+        y_pred = result['y_pred']
+        
+        # Skip if no predictions
+        if len(y_true) == 0 or len(y_pred) == 0:
+            continue
+        
+        # Calculate metrics per class
+        precision, recall, f1, support = precision_recall_fscore_support(
+            y_true, y_pred, labels=range(num_classes), zero_division=0
+        )
+        
+        # Store results
+        for i in range(num_classes):
+            metrics_data.append({
+                'Model': model_name,
+                'Class': class_names[i],
+                'Precision': precision[i],
+                'Recall': recall[i],
+                'F1 Score': f1[i],
+                'Support': support[i]
+            })
+    
+    # Create DataFrame
+    metrics_df = pd.DataFrame(metrics_data)
+    
+    # Save metrics to CSV
+    csv_path = os.path.join(output_dir, "classification_metrics_by_class.csv")
+    metrics_df.to_csv(csv_path, index=False)
+    
+    # Create comparison visualizations for each metric
+    metrics_to_plot = ['Precision', 'Recall', 'F1 Score']
+    all_paths = {}
+    
+    for metric in metrics_to_plot:
+        # Create figure
+        plt.figure(figsize=(12, 8))
+        
+        # Reshape data for bar chart
+        pivot_df = metrics_df.pivot(index='Class', columns='Model', values=metric)
+        
+        # Create bar chart
+        ax = pivot_df.plot(kind='bar')
+        
+        plt.xlabel('Class')
+        plt.ylabel(metric)
+        plt.title(f'{metric} by Class Across Models')
+        plt.legend(title='Model')
+        plt.grid(axis='y', alpha=0.3)
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+        
+        # Save figure
+        metric_path = os.path.join(output_dir, f"comparison_{metric.lower().replace(' ', '_')}")
+        png_path, svg_path = save_figure(plt, metric_path, formats=['png', 'svg'])
+        all_paths[metric] = png_path
+    
+    # Create heatmap showing F1 score for each model and class
+    plt.figure(figsize=(12, 8))
+    pivot_df = metrics_df.pivot(index='Class', columns='Model', values='F1 Score')
+    sns.heatmap(pivot_df, annot=True, cmap='Blues', fmt='.2f')
+    plt.title('F1 Score by Class and Model')
+    plt.tight_layout()
+    
+    # Save heatmap
+    heatmap_path = os.path.join(output_dir, "f1_score_heatmap")
+    png_path, svg_path = save_figure(plt, heatmap_path, formats=['png', 'svg'])
+    all_paths['F1 Heatmap'] = png_path
+    
+    # Create a spider plot for each class showing all metrics across models
+    for class_name in class_names:
+        class_df = metrics_df[metrics_df['Class'] == class_name]
+        
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, polar=True)
+        
+        # Metrics to include in the spider plot
+        radar_metrics = ['Precision', 'Recall', 'F1 Score']
+        
+        # Number of variables
+        N = len(radar_metrics)
+        
+        # What will be the angle of each axis in the plot
+        angles = [n / float(N) * 2 * np.pi for n in range(N)]
+        angles += angles[:1]  # Close the loop
+        
+        # Draw the chart for each model
+        for model_name in model_names:
+            model_data = class_df[class_df['Model'] == model_name]
+            if len(model_data) == 0:
+                continue
+                
+            values = model_data[radar_metrics].values[0].tolist()
+            values += values[:1]  # Close the loop
+            
+            # Plot values
+            ax.plot(angles, values, linewidth=2, linestyle='solid', label=model_name)
+            ax.fill(angles, values, alpha=0.1)
+        
+        # Fix axis to go in the right order and start at 12 o'clock
+        ax.set_theta_offset(np.pi / 2)
+        ax.set_theta_direction(-1)
+        
+        # Draw axis lines for each angle and label
+        ax.set_xticks(angles[:-1])
+        ax.set_xticklabels(radar_metrics)
+        
+        # Set limits for consistent visualization
+        ax.set_ylim(0, 1)
+        
+        # Add legend
+        plt.legend(loc='upper right', bbox_to_anchor=(0.1, 0.1))
+        plt.title(f'Metrics for Class: {class_name}')
+        
+        # Save figure
+        class_path = os.path.join(output_dir, f"metrics_radar_{class_name.replace(' ', '_')}")
+        png_path, svg_path = save_figure(plt, class_path, formats=['png', 'svg'])
+    
+    print(f"Classification metrics comparison saved to {output_dir}")
+    
+    # Return path to main metrics visualization
+    return csv_path
+
+
 def evaluate_models(models, model_names, test_loader, args):
     """Evaluate models and compare their performance."""
     print("Evaluating models...")
@@ -257,15 +466,81 @@ def evaluate_models(models, model_names, test_loader, args):
         print(f"{model_name} - Accuracy: {metrics['accuracy']:.4f}, F1: {metrics['f1']:.4f}")
         print(f"Evaluation results saved to {eval_dir}")
     
-    # Statistical significance testing
+    # If we have multiple models, generate comparison visualizations
     if len(results) > 1:
+        # Create evaluation comparisons directory
+        comparison_dir = os.path.join(args.output_dir, 'comparisons', 'evaluation')
+        os.makedirs(comparison_dir, exist_ok=True)
+        
+        # Generate confusion matrix comparison
+        compare_confusion_matrices(results, comparison_dir)
+        
+        # Generate classification metrics comparison
+        compare_classification_metrics(results, comparison_dir)
+        
+        # Statistical significance testing and save to comparison directory
         print("\nPerforming statistical significance testing...")
-        p_value_df, csv_path, plot_path = statistical_significance_test(results, output_dir=args.output_dir)
+        p_value_df, csv_path, plot_path = statistical_significance_test(
+            results, 
+            output_dir=comparison_dir
+        )
         print(f"Statistical significance results saved to {csv_path}")
         
-        # McNemar test
-        mcnemar_df, mcnemar_csv = mcnemar_test(results, output_dir=args.output_dir)
+        # McNemar test and save to comparison directory
+        mcnemar_df, mcnemar_csv = mcnemar_test(
+            results, 
+            output_dir=comparison_dir
+        )
         print(f"McNemar test results saved to {mcnemar_csv}")
+        
+        # Create tabular comparison of overall metrics
+        overall_metrics = []
+        for result in results:
+            overall_metrics.append({
+                'Model': result['name'],
+                'Accuracy': result['accuracy'],
+                'Precision': result['precision'],
+                'Recall': result['recall'],
+                'F1 Score': result['f1']
+            })
+        
+        # Save as CSV
+        overall_df = pd.DataFrame(overall_metrics)
+        overall_csv = os.path.join(comparison_dir, "overall_metrics_comparison.csv")
+        overall_df.to_csv(overall_csv, index=False)
+        
+        # Create bar chart for each metric
+        for metric in ['Accuracy', 'Precision', 'Recall', 'F1 Score']:
+            plt.figure(figsize=(10, 6))
+            plt.bar(overall_df['Model'], overall_df[metric])
+            plt.xlabel('Model')
+            plt.ylabel(metric)
+            plt.title(f'Comparison of {metric} Across Models')
+            plt.xticks(rotation=45, ha='right')
+            plt.tight_layout()
+            
+            # Save figure
+            metric_path = os.path.join(comparison_dir, f"overall_{metric.lower().replace(' ', '_')}")
+            save_figure(plt, metric_path, formats=['png', 'svg'])
+        
+        print(f"Overall metrics comparison saved to {overall_csv}")
+    else:
+        # If only one model, still save the results to the comparisons directory for consistency
+        if len(results) == 1:
+            comparison_dir = os.path.join(args.output_dir, 'comparisons', 'evaluation')
+            os.makedirs(comparison_dir, exist_ok=True)
+            
+            overall_metrics = [{
+                'Model': results[0]['name'],
+                'Accuracy': results[0]['accuracy'],
+                'Precision': results[0]['precision'],
+                'Recall': results[0]['recall'],
+                'F1 Score': results[0]['f1']
+            }]
+            
+            overall_df = pd.DataFrame(overall_metrics)
+            overall_csv = os.path.join(comparison_dir, "overall_metrics.csv")
+            overall_df.to_csv(overall_csv, index=False)
     
     return results
 
@@ -493,6 +768,515 @@ def save_comprehensive_comparison(models, model_names, evaluation_results, deplo
             print(f"Warning: Could not generate radar chart: {e}")
     
     return comparison_df
+
+
+def visualize_side_by_side_robustness(robustness_results, output_dir):
+    """
+    Create side-by-side visualizations comparing robustness of models under different perturbations.
+    
+    Args:
+        robustness_results: List of robustness result dictionaries
+        output_dir: Directory to save comparison visualizations
+    """
+    print("Generating side-by-side robustness comparison visualizations...")
+    
+    # Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Extract model names
+    model_names = [result['name'] for result in robustness_results]
+    
+    # Collect perturbation types and accuracy data
+    perturbation_types = []
+    baseline_accuracies = {}
+    accuracy_under_perturbation = {}
+    
+    for result in robustness_results:
+        model_name = result['name']
+        results_dict = result['results']
+        
+        # Get baseline accuracy
+        if 'baseline' in results_dict:
+            baseline_accuracies[model_name] = results_dict['baseline'].get('accuracy', 0)
+        else:
+            baseline_accuracies[model_name] = 0
+        
+        # Get accuracies under perturbation
+        for pert_type, pert_result in results_dict.items():
+            if pert_type != 'baseline':
+                if pert_type not in perturbation_types:
+                    perturbation_types.append(pert_type)
+                
+                if pert_type not in accuracy_under_perturbation:
+                    accuracy_under_perturbation[pert_type] = {}
+                
+                accuracy_under_perturbation[pert_type][model_name] = pert_result.get('accuracy', 0)
+    
+    # Create a DataFrame for each perturbation type
+    comparison_data = []
+    
+    for pert_type in perturbation_types:
+        for model_name in model_names:
+            if model_name in accuracy_under_perturbation.get(pert_type, {}):
+                pert_acc = accuracy_under_perturbation[pert_type][model_name]
+                baseline_acc = baseline_accuracies.get(model_name, 0)
+                acc_drop = baseline_acc - pert_acc
+                
+                comparison_data.append({
+                    'Model': model_name,
+                    'Perturbation': pert_type.replace('_', ' ').title(),
+                    'Baseline Accuracy': baseline_acc,
+                    'Perturbed Accuracy': pert_acc,
+                    'Accuracy Drop': acc_drop,
+                    'Relative Drop (%)': (acc_drop / baseline_acc * 100) if baseline_acc > 0 else 0
+                })
+    
+    # Create DataFrame
+    comparison_df = pd.DataFrame(comparison_data)
+    
+    # Save to CSV
+    csv_path = os.path.join(output_dir, "robustness_comparison_detailed.csv")
+    comparison_df.to_csv(csv_path, index=False)
+    
+    # Create visualizations
+    # 1. Bar chart showing accuracy drop for each model under each perturbation
+    plt.figure(figsize=(14, 8))
+    
+    # Pivot data for plotting
+    pivot_df = comparison_df.pivot(index='Perturbation', columns='Model', values='Accuracy Drop')
+    
+    # Plot
+    ax = pivot_df.plot(kind='bar')
+    
+    plt.xlabel('Perturbation Type')
+    plt.ylabel('Accuracy Drop')
+    plt.title('Accuracy Drop Under Different Perturbations')
+    plt.legend(title='Model')
+    plt.grid(axis='y', alpha=0.3)
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    
+    # Save figure
+    drop_path = os.path.join(output_dir, "accuracy_drop_by_perturbation")
+    drop_png, drop_svg = save_figure(plt, drop_path, formats=['png', 'svg'])
+    
+    # 2. Grouped bar chart showing baseline vs perturbed accuracy
+    # For each perturbation type
+    for pert_type in perturbation_types:
+        pert_data = comparison_df[comparison_df['Perturbation'] == pert_type.replace('_', ' ').title()]
+        
+        plt.figure(figsize=(12, 6))
+        
+        # Set up bar positions
+        x = np.arange(len(model_names))
+        width = 0.35
+        
+        # Create plot
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        baseline_values = [baseline_accuracies.get(model, 0) for model in model_names]
+        pert_values = []
+        
+        for model in model_names:
+            model_data = pert_data[pert_data['Model'] == model]
+            if len(model_data) > 0:
+                pert_values.append(model_data['Perturbed Accuracy'].values[0])
+            else:
+                pert_values.append(0)
+        
+        # Plot bars
+        ax.bar(x - width/2, baseline_values, width, label='Baseline Accuracy')
+        ax.bar(x + width/2, pert_values, width, label=f'Accuracy under {pert_type.replace("_", " ").title()}')
+        
+        # Add labels and title
+        ax.set_xlabel('Model')
+        ax.set_ylabel('Accuracy')
+        ax.set_title(f'Model Accuracy Under {pert_type.replace("_", " ").title()} Perturbation')
+        ax.set_xticks(x)
+        ax.set_xticklabels(model_names, rotation=45, ha='right')
+        ax.legend()
+        
+        plt.tight_layout()
+        
+        # Save figure
+        pert_path = os.path.join(output_dir, f"accuracy_under_{pert_type}")
+        save_figure(plt, pert_path, formats=['png', 'svg'])
+    
+    # 3. Create heatmap for relative accuracy drop
+    plt.figure(figsize=(12, 8))
+    pivot_rel_df = comparison_df.pivot(index='Perturbation', columns='Model', values='Relative Drop (%)')
+    sns.heatmap(pivot_rel_df, annot=True, cmap='coolwarm_r', fmt='.2f')
+    plt.title('Relative Accuracy Drop (%) Under Different Perturbations')
+    plt.tight_layout()
+    
+    # Save heatmap
+    heatmap_path = os.path.join(output_dir, "relative_drop_heatmap")
+    heatmap_png, heatmap_svg = save_figure(plt, heatmap_path, formats=['png', 'svg'])
+    
+    print(f"Side-by-side robustness comparisons saved to {output_dir}")
+    
+    return csv_path
+
+
+def visualize_deployment_comparison(deployment_results, model_names, output_dir):
+    """
+    Create visualizations comparing deployment metrics across models.
+    
+    Args:
+        deployment_results: List of deployment result dataframes
+        model_names: List of model names
+        output_dir: Directory to save comparison visualizations
+    """
+    print("Generating deployment metrics comparison visualizations...")
+    
+    # Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Create a combined dataframe for all models
+    combined_data = []
+    
+    for i, (df, model_name) in enumerate(zip(deployment_results, model_names)):
+        # Add model name to the dataframe
+        df_copy = df.copy()
+        df_copy['model'] = model_name
+        combined_data.append(df_copy)
+    
+    # Concatenate all dataframes
+    combined_df = pd.concat(combined_data, ignore_index=True)
+    
+    # Save combined data to CSV
+    csv_path = os.path.join(output_dir, "deployment_metrics_all_models.csv")
+    combined_df.to_csv(csv_path, index=False)
+    
+    # Create visualizations
+    
+    # 1. Inference time vs. batch size for all models
+    plt.figure(figsize=(12, 6))
+    
+    for model_name in model_names:
+        model_data = combined_df[combined_df['model'] == model_name]
+        plt.plot(model_data['batch_size'], model_data['inference_time_ms'], 
+                 marker='o', linestyle='-', label=model_name)
+    
+    plt.xlabel('Batch Size')
+    plt.ylabel('Inference Time (ms)')
+    plt.title('Inference Time vs. Batch Size')
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    
+    # Save figure
+    time_path = os.path.join(output_dir, "inference_time_comparison")
+    time_png, time_svg = save_figure(plt, time_path, formats=['png', 'svg'])
+    
+    # 2. Memory usage vs. batch size for all models
+    plt.figure(figsize=(12, 6))
+    
+    for model_name in model_names:
+        model_data = combined_df[combined_df['model'] == model_name]
+        plt.plot(model_data['batch_size'], model_data['memory_usage_mb'], 
+                 marker='o', linestyle='-', label=model_name)
+    
+    plt.xlabel('Batch Size')
+    plt.ylabel('Memory Usage (MB)')
+    plt.title('Memory Usage vs. Batch Size')
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    
+    # Save figure
+    memory_path = os.path.join(output_dir, "memory_usage_comparison")
+    memory_png, memory_svg = save_figure(plt, memory_path, formats=['png', 'svg'])
+    
+    # 3. Throughput vs. batch size for all models
+    plt.figure(figsize=(12, 6))
+    
+    for model_name in model_names:
+        model_data = combined_df[combined_df['model'] == model_name]
+        # Calculate throughput (images per second)
+        throughput = model_data['batch_size'] / (model_data['inference_time_ms'] / 1000)
+        plt.plot(model_data['batch_size'], throughput, 
+                 marker='o', linestyle='-', label=model_name)
+    
+    plt.xlabel('Batch Size')
+    plt.ylabel('Throughput (images/second)')
+    plt.title('Throughput vs. Batch Size')
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    
+    # Save figure
+    throughput_path = os.path.join(output_dir, "throughput_comparison")
+    throughput_png, throughput_svg = save_figure(plt, throughput_path, formats=['png', 'svg'])
+    
+    # 4. Bar chart for single-image inference time (batch size 1)
+    plt.figure(figsize=(10, 6))
+    
+    # Get data for batch size 1
+    batch1_data = combined_df[combined_df['batch_size'] == 1]
+    
+    # Sort by inference time
+    batch1_data = batch1_data.sort_values('inference_time_ms')
+    
+    plt.bar(batch1_data['model'], batch1_data['inference_time_ms'])
+    plt.xlabel('Model')
+    plt.ylabel('Inference Time (ms)')
+    plt.title('Inference Time for Single Image (Batch Size 1)')
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    
+    # Save figure
+    single_path = os.path.join(output_dir, "single_image_inference_time")
+    single_png, single_svg = save_figure(plt, single_path, formats=['png', 'svg'])
+    
+    # 5. Memory efficiency (images per MB) for batch size 32
+    plt.figure(figsize=(10, 6))
+    
+    # Get data for batch size 32 (or maximum available)
+    max_batch = combined_df['batch_size'].max()
+    max_batch_data = combined_df[combined_df['batch_size'] == max_batch]
+    
+    # Calculate memory efficiency
+    max_batch_data['memory_efficiency'] = max_batch_data['batch_size'] / max_batch_data['memory_usage_mb']
+    
+    # Sort by memory efficiency
+    max_batch_data = max_batch_data.sort_values('memory_efficiency', ascending=False)
+    
+    plt.bar(max_batch_data['model'], max_batch_data['memory_efficiency'])
+    plt.xlabel('Model')
+    plt.ylabel('Memory Efficiency (images/MB)')
+    plt.title(f'Memory Efficiency for Batch Size {max_batch}')
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    
+    # Save figure
+    efficiency_path = os.path.join(output_dir, "memory_efficiency")
+    efficiency_png, efficiency_svg = save_figure(plt, efficiency_path, formats=['png', 'svg'])
+    
+    print(f"Deployment metrics comparison visualizations saved to {output_dir}")
+    
+    return csv_path
+
+
+def visualize_efficiency_comparison(models, model_names, evaluation_results, output_dir):
+    """
+    Create enhanced visualizations comparing efficiency metrics across models.
+    
+    Args:
+        models: List of model objects
+        model_names: List of model names
+        evaluation_results: List of evaluation result dictionaries
+        output_dir: Directory to save comparison visualizations
+    """
+    print("Generating enhanced efficiency metrics comparison visualizations...")
+    
+    # Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Collect data for each model
+    efficiency_data = []
+    
+    for i, (model, model_name) in enumerate(zip(models, model_names)):
+        # Calculate model parameters and size
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        model_size_mb = calculate_model_size(model)
+        
+        # Get accuracy from evaluation results
+        accuracy = evaluation_results[i]['accuracy'] if i < len(evaluation_results) else 0
+        
+        # Store data
+        efficiency_data.append({
+            'Model': model_name,
+            'Total Parameters': total_params,
+            'Trainable Parameters': trainable_params,
+            'Model Size (MB)': model_size_mb,
+            'Accuracy': accuracy,
+            'Parameter Efficiency': accuracy / (total_params / 1_000_000) if total_params > 0 else 0,  # Accuracy per million parameters
+            'Size Efficiency': accuracy / model_size_mb if model_size_mb > 0 else 0  # Accuracy per MB
+        })
+    
+    # Create DataFrame
+    efficiency_df = pd.DataFrame(efficiency_data)
+    
+    # Save to CSV
+    csv_path = os.path.join(output_dir, "efficiency_metrics_comparison.csv")
+    efficiency_df.to_csv(csv_path, index=False)
+    
+    # Create visualizations
+    
+    # 1. Parameters comparison
+    plt.figure(figsize=(12, 6))
+    
+    # Sort by total parameters
+    sorted_df = efficiency_df.sort_values('Total Parameters')
+    
+    # Set up bar positions
+    x = np.arange(len(model_names))
+    width = 0.35
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    # Convert to millions for better readability
+    total_params_m = sorted_df['Total Parameters'] / 1_000_000
+    trainable_params_m = sorted_df['Trainable Parameters'] / 1_000_000
+    
+    ax.bar(x - width/2, total_params_m, width, label='Total Parameters')
+    ax.bar(x + width/2, trainable_params_m, width, label='Trainable Parameters')
+    
+    ax.set_xlabel('Model')
+    ax.set_ylabel('Parameters (millions)')
+    ax.set_title('Model Parameters Comparison')
+    ax.set_xticks(x)
+    ax.set_xticklabels(sorted_df['Model'], rotation=45, ha='right')
+    ax.legend()
+    plt.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    
+    # Save figure
+    params_path = os.path.join(output_dir, "parameters_comparison")
+    params_png, params_svg = save_figure(plt, params_path, formats=['png', 'svg'])
+    
+    # 2. Model size comparison
+    plt.figure(figsize=(10, 6))
+    
+    # Sort by model size
+    sorted_by_size = efficiency_df.sort_values('Model Size (MB)')
+    
+    plt.bar(sorted_by_size['Model'], sorted_by_size['Model Size (MB)'])
+    plt.xlabel('Model')
+    plt.ylabel('Model Size (MB)')
+    plt.title('Model Size Comparison')
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    
+    # Save figure
+    size_path = os.path.join(output_dir, "model_size_comparison")
+    size_png, size_svg = save_figure(plt, size_path, formats=['png', 'svg'])
+    
+    # 3. Accuracy vs. parameters scatter plot
+    plt.figure(figsize=(10, 6))
+    
+    plt.scatter(
+        efficiency_df['Total Parameters'] / 1_000_000,  # Convert to millions
+        efficiency_df['Accuracy'] * 100,  # Convert to percentage
+        s=100,  # Marker size
+        alpha=0.7
+    )
+    
+    # Add labels for each point
+    for i, model_name in enumerate(efficiency_df['Model']):
+        plt.annotate(
+            model_name,
+            (efficiency_df['Total Parameters'].iloc[i] / 1_000_000, efficiency_df['Accuracy'].iloc[i] * 100),
+            xytext=(5, 5),
+            textcoords='offset points'
+        )
+    
+    plt.xlabel('Total Parameters (millions)')
+    plt.ylabel('Accuracy (%)')
+    plt.title('Accuracy vs. Model Parameters')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    # Save figure
+    accuracy_params_path = os.path.join(output_dir, "accuracy_vs_parameters")
+    accuracy_params_png, accuracy_params_svg = save_figure(plt, accuracy_params_path, formats=['png', 'svg'])
+    
+    # 4. Parameter efficiency (Accuracy per million parameters)
+    plt.figure(figsize=(10, 6))
+    
+    # Sort by parameter efficiency
+    sorted_by_param_eff = efficiency_df.sort_values('Parameter Efficiency', ascending=False)
+    
+    plt.bar(sorted_by_param_eff['Model'], sorted_by_param_eff['Parameter Efficiency'])
+    plt.xlabel('Model')
+    plt.ylabel('Accuracy per Million Parameters')
+    plt.title('Parameter Efficiency Comparison')
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    
+    # Save figure
+    param_eff_path = os.path.join(output_dir, "parameter_efficiency")
+    param_eff_png, param_eff_svg = save_figure(plt, param_eff_path, formats=['png', 'svg'])
+    
+    # 5. Size efficiency (Accuracy per MB)
+    plt.figure(figsize=(10, 6))
+    
+    # Sort by size efficiency
+    sorted_by_size_eff = efficiency_df.sort_values('Size Efficiency', ascending=False)
+    
+    plt.bar(sorted_by_size_eff['Model'], sorted_by_size_eff['Size Efficiency'])
+    plt.xlabel('Model')
+    plt.ylabel('Accuracy per MB')
+    plt.title('Size Efficiency Comparison')
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    
+    # Save figure
+    size_eff_path = os.path.join(output_dir, "size_efficiency")
+    size_eff_png, size_eff_svg = save_figure(plt, size_eff_path, formats=['png', 'svg'])
+    
+    # 6. Efficiency radar chart
+    if len(model_names) >= 2:
+        try:
+            # Normalize values between 0 and 1 for radar chart
+            radar_df = efficiency_df.copy()
+            radar_metrics = ['Accuracy', 'Parameter Efficiency', 'Size Efficiency']
+            
+            # Normalize each metric
+            for metric in radar_metrics:
+                max_val = radar_df[metric].max()
+                min_val = radar_df[metric].min()
+                if max_val > min_val:
+                    radar_df[metric] = (radar_df[metric] - min_val) / (max_val - min_val)
+            
+            # Create radar chart
+            fig = plt.figure(figsize=(10, 10))
+            ax = fig.add_subplot(111, polar=True)
+            
+            # Number of variables
+            N = len(radar_metrics)
+            
+            # What will be the angle of each axis in the plot
+            angles = [n / float(N) * 2 * np.pi for n in range(N)]
+            angles += angles[:1]  # Close the loop
+            
+            # Draw the chart for each model
+            for i, model_name in enumerate(model_names):
+                values = radar_df.loc[i, radar_metrics].values.tolist()
+                values += values[:1]  # Close the loop
+                
+                # Plot values
+                ax.plot(angles, values, linewidth=2, linestyle='solid', label=model_name)
+                ax.fill(angles, values, alpha=0.1)
+            
+            # Fix axis to go in the right order and start at 12 o'clock
+            ax.set_theta_offset(np.pi / 2)
+            ax.set_theta_direction(-1)
+            
+            # Draw axis lines for each angle and label
+            ax.set_xticks(angles[:-1])
+            ax.set_xticklabels(radar_metrics)
+            
+            # Add legend
+            plt.legend(loc='upper right', bbox_to_anchor=(0.1, 0.1))
+            plt.title('Efficiency Metrics Radar Chart')
+            
+            # Save radar chart
+            radar_path = os.path.join(output_dir, "efficiency_radar")
+            radar_png, radar_svg = save_figure(plt, radar_path, formats=['png', 'svg'])
+        except Exception as e:
+            print(f"Warning: Could not generate efficiency radar chart: {e}")
+    
+    print(f"Efficiency metrics comparison visualizations saved to {output_dir}")
+    
+    return csv_path
 
 
 def main():
@@ -761,6 +1545,9 @@ def main():
             
             # Create overall robustness summary
             try:
+                # Generate side-by-side comparisons of all models under all perturbations
+                visualize_side_by_side_robustness(robustness_results, robustness_comparison_dir)
+                
                 # Prepare data for summary plot
                 summary_data = []
                 
@@ -818,20 +1605,40 @@ def main():
         # Compare deployment metrics
         if len(deployment_results) > 1:
             print("\nComparing deployment metrics...")
+            
+            # Create deployment comparisons directory
+            deployment_comparison_dir = os.path.join(comparisons_dir, 'deployment')
+            os.makedirs(deployment_comparison_dir, exist_ok=True)
+            
+            # Create standard deployment metrics comparison using existing function
             model_list = [{'name': name, 'model': model} for name, model in zip(model_names, models)]
             df, csv_path, plot_path = compare_deployment_metrics(
                 model_list,
-                output_dir=os.path.join(comparisons_dir, 'deployment')
+                output_dir=deployment_comparison_dir
             )
-            print(f"Deployment metrics comparison saved to {csv_path}")
+            
+            # Create enhanced visualizations for deployment comparison
+            visualize_deployment_comparison(deployment_results, model_names, deployment_comparison_dir)
+            
+            print(f"Deployment metrics comparison saved to {deployment_comparison_dir}")
     
     # Run efficiency metrics
     efficiency_results = None
-    if args.all:
+    if args.all or len(models) > 1:  # Always run efficiency metrics when comparing multiple models
         print("\n" + "="*80)
         print("RUNNING EFFICIENCY METRICS")
         print("="*80)
+        
+        # Create efficiency comparisons directory
+        efficiency_comparison_dir = os.path.join(comparisons_dir, 'efficiency')
+        os.makedirs(efficiency_comparison_dir, exist_ok=True)
+        
+        # Run standard efficiency metrics
         efficiency_results = run_efficiency_metrics(models, model_names, evaluation_results, args)
+        
+        # Generate enhanced efficiency visualizations for direct model comparison
+        if len(models) > 1:
+            visualize_efficiency_comparison(models, model_names, evaluation_results, efficiency_comparison_dir)
     
     # Generate comprehensive comparison summary
     if len(models) > 1:
