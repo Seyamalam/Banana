@@ -438,18 +438,35 @@ def evaluate_models(models, model_names, test_loader, args):
             # Make predictions
             model.eval()  # Set model to evaluation mode
             with torch.no_grad():
-                outputs = model(images.to(device))
+                outputs = model(images)
                 _, preds = torch.max(outputs, 1)
             
-            # Visualize predictions (first 16 samples only)
+            # Create a grid of images with predictions
+            fig = plt.figure(figsize=(12, 8))
+            for i in range(min(16, len(images))):
+                ax = fig.add_subplot(4, 4, i+1, xticks=[], yticks=[])
+                # Move tensor to CPU and convert to numpy for plotting
+                img = images[i].cpu().permute(1, 2, 0).numpy()
+                
+                # Denormalize image
+                mean = np.array([0.485, 0.456, 0.406])
+                std = np.array([0.229, 0.224, 0.225])
+                img = std * img + mean
+                img = np.clip(img, 0, 1)
+                
+                ax.imshow(img)
+                
+                # Color based on whether prediction is correct
+                title_color = 'green' if preds[i] == labels[i] else 'red'
+                true_label = IDX_TO_CLASS[labels[i].item()]
+                pred_label = IDX_TO_CLASS[preds[i].item()]
+                ax.set_title(f"T: {true_label}\nP: {pred_label}", color=title_color)
+            
+            plt.tight_layout()
+            
+            # Save the figure
             vis_path = os.path.join(eval_dir, f"{model_name}_predictions")
-            visualize_predictions(
-                images[:16].cpu(),  # Ensure images are on CPU
-                labels[:16].cpu(),  # Ensure labels are on CPU
-                preds[:16].cpu(),   # Ensure predictions are on CPU
-                vis_path, 
-                formats=['png', 'svg']
-            )
+            save_figure(plt, vis_path, formats=['png', 'svg'])
         except Exception as e:
             print(f"Warning: Could not visualize predictions: {e}")
             
@@ -686,13 +703,19 @@ def run_efficiency_metrics(models, model_names, evaluation_results, args):
             for model, model_name in zip(models, model_names):
                 try:
                     print(f"  Analyzing layer distribution for {model_name}...")
-                    layer_df, layer_csv, layer_plot = analyze_layer_distribution(
+                    layer_results = analyze_layer_distribution(
                         model,
                         model_name,
                         input_size=(1, 3, 224, 224),
                         output_dir=layers_dir
                     )
-                    print(f"  ✅ Layer distribution for {model_name} saved to {layer_csv}")
+                    
+                    # Check if we got actual results or just a total FLOPs count
+                    if isinstance(layer_results, tuple) and len(layer_results) == 3:
+                        layer_df, layer_csv, layer_plot = layer_results
+                        print(f"  ✅ Layer distribution for {model_name} saved to {layer_csv}")
+                    else:
+                        print(f"  ✅ Total FLOPs for {model_name} calculated, but detailed layer analysis not available")
                 except Exception as e:
                     print(f"  ⚠️ Warning: Could not analyze layer distribution for {model_name}: {e}")
         else:
@@ -1110,7 +1133,6 @@ def visualize_deployment_comparison(deployment_results, model_names, output_dir)
     # Create a combined dataframe for all models
     combined_data = []
     
-    # First, examine the structure of the DataFrames
     try:
         if not deployment_results:
             print("⚠️ Warning: No deployment results to visualize")
@@ -1122,7 +1144,8 @@ def visualize_deployment_comparison(deployment_results, model_names, output_dir)
         
         # Check columns in the first dataframe to determine structure
         sample_df = deployment_results[0]
-        print(f"Available columns in deployment metrics: {sample_df.columns.tolist()}")
+        available_columns = sample_df.columns.tolist()
+        print(f"Available columns in deployment metrics: {available_columns}")
         
         # Create a simple combined dataframe with what we have
         for i, (df, model_name) in enumerate(zip(deployment_results, model_names)):
@@ -1136,14 +1159,14 @@ def visualize_deployment_comparison(deployment_results, model_names, output_dir)
         combined_df.to_csv(csv_path, index=False)
         
         # Create visualizations for each numeric column
-        for col in sample_df.columns:
+        for col in available_columns:
             if col != 'model' and pd.api.types.is_numeric_dtype(sample_df[col].dtype):
                 try:
                     plt.figure(figsize=(10, 6))
                     summary_data = []
                     
                     for df, model_name in zip(deployment_results, model_names):
-                        # Use mean value for each metric
+                        # Use mean value for each metric if column exists
                         summary_data.append({
                             'Model': model_name,
                             col: df[col].mean() if col in df.columns else 0
@@ -1164,23 +1187,27 @@ def visualize_deployment_comparison(deployment_results, model_names, output_dir)
                 except Exception as e:
                     print(f"⚠️ Warning: Could not create visualization for {col}: {e}")
         
-        # Try to create more specialized visualizations based on column availability
-        if 'latency_batch1_ms' in sample_df.columns:
+        # Check for specific columns and create specialized visualizations when available
+        
+        # Latency visualization
+        latency_columns = [col for col in available_columns if 'latency' in col.lower() or 'time' in col.lower()]
+        if latency_columns:
+            latency_col = latency_columns[0]  # Use the first latency column found
             plt.figure(figsize=(10, 6))
-            plt.bar(combined_df['model'], combined_df['latency_batch1_ms'])
+            plt.bar(combined_df['model'], combined_df[latency_col])
             plt.xlabel('Model')
             plt.ylabel('Latency (ms)')
-            plt.title('Single Image Inference Latency Comparison')
+            plt.title('Inference Latency Comparison')
             plt.xticks(rotation=45, ha='right')
             plt.grid(axis='y', alpha=0.3)
             plt.tight_layout()
             
             # Save figure
-            latency_path = os.path.join(output_dir, "single_image_latency_comparison")
+            latency_path = os.path.join(output_dir, "inference_latency_comparison")
             save_figure(plt, latency_path, formats=['png', 'svg'])
         
-        # Try to create model size comparison if those columns exist
-        size_columns = [col for col in sample_df.columns if 'size' in col.lower() and 'mb' in col.lower()]
+        # Model size visualization
+        size_columns = [col for col in available_columns if 'size' in col.lower() and 'mb' in col.lower()]
         if size_columns:
             plt.figure(figsize=(12, 6))
             
@@ -1204,10 +1231,12 @@ def visualize_deployment_comparison(deployment_results, model_names, output_dir)
             size_path = os.path.join(output_dir, "model_size_comparison")
             save_figure(plt, size_path, formats=['png', 'svg'])
             
-        # If there's throughput data
-        if 'max_throughput_imgs_per_sec' in sample_df.columns:
+        # Throughput visualization
+        throughput_columns = [col for col in available_columns if 'throughput' in col.lower() or 'img' in col.lower()]
+        if throughput_columns:
+            throughput_col = throughput_columns[0]  # Use the first throughput column found
             plt.figure(figsize=(10, 6))
-            plt.bar(combined_df['model'], combined_df['max_throughput_imgs_per_sec'])
+            plt.bar(combined_df['model'], combined_df[throughput_col])
             plt.xlabel('Model')
             plt.ylabel('Throughput (images/second)')
             plt.title('Maximum Throughput Comparison')
@@ -1954,12 +1983,22 @@ def main():
                     model_name = result['name']
                     model_results = result['results']
                     
+                    # Check if model_results has the expected structure
+                    if not isinstance(model_results, dict) or 'baseline' not in model_results:
+                        print(f"⚠️ Warning: Invalid robustness results format for {model_name}")
+                        continue
+                    
                     # Calculate average accuracy drop across all perturbations
                     baseline_acc = model_results.get('baseline', {}).get('accuracy', 0)
                     
                     for pert_type, pert_result in model_results.items():
-                        if pert_type != 'baseline':
+                        if pert_type != 'baseline' and isinstance(pert_result, dict):
                             pert_acc = pert_result.get('accuracy', 0)
+                            
+                            # Skip if metrics are not numeric
+                            if not isinstance(baseline_acc, (int, float)) or not isinstance(pert_acc, (int, float)):
+                                continue
+                            
                             acc_drop = baseline_acc - pert_acc
                             
                             summary_data.append({
@@ -1968,25 +2007,32 @@ def main():
                                 'Accuracy Drop': acc_drop
                             })
                 
-                # Create summary dataframe
-                summary_df = pd.DataFrame(summary_data)
-                
-                # Save to CSV
-                summary_csv = os.path.join(robustness_comparison_dir, "robustness_summary.csv")
-                summary_df.to_csv(summary_csv, index=False)
-                
-                # Create heatmap for accuracy drop
-                plt.figure(figsize=(12, 8))
-                pivot_df = summary_df.pivot(index='Perturbation', columns='Model', values='Accuracy Drop')
-                sns.heatmap(pivot_df, annot=True, cmap='coolwarm_r', fmt='.3f')
-                plt.title('Accuracy Drop Under Different Perturbations')
-                plt.tight_layout()
-                
-                # Save heatmap
-                heatmap_path = os.path.join(robustness_comparison_dir, "robustness_heatmap")
-                save_figure(plt, heatmap_path, formats=['png', 'svg'])
-                
-                print(f"✅ Robustness summary saved to {summary_csv}")
+                # Create summary dataframe if we have data
+                if summary_data:
+                    summary_df = pd.DataFrame(summary_data)
+                    
+                    # Save to CSV
+                    summary_csv = os.path.join(robustness_comparison_dir, "robustness_summary.csv")
+                    summary_df.to_csv(summary_csv, index=False)
+                    
+                    # Check if we have enough data for a heatmap
+                    if len(summary_df) > 0 and len(summary_df['Model'].unique()) > 0 and len(summary_df['Perturbation'].unique()) > 0:
+                        # Create heatmap for accuracy drop
+                        plt.figure(figsize=(12, 8))
+                        pivot_df = summary_df.pivot(index='Perturbation', columns='Model', values='Accuracy Drop')
+                        sns.heatmap(pivot_df, annot=True, cmap='coolwarm_r', fmt='.3f')
+                        plt.title('Accuracy Drop Under Different Perturbations')
+                        plt.tight_layout()
+                        
+                        # Save heatmap
+                        heatmap_path = os.path.join(robustness_comparison_dir, "robustness_heatmap")
+                        save_figure(plt, heatmap_path, formats=['png', 'svg'])
+                        
+                        print(f"✅ Robustness summary saved to {summary_csv}")
+                    else:
+                        print("⚠️ Warning: Not enough data to create robustness heatmap")
+                else:
+                    print("⚠️ Warning: No valid robustness data available for visualization")
             except Exception as e:
                 print(f"⚠️ Warning: Could not generate robustness summary: {e}")
     

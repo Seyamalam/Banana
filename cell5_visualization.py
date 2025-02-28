@@ -47,11 +47,15 @@ def save_figure(
     
     if close_after:
         # Handle both Figure objects and pyplot module
-        if plt_figure == plt:
-            plt.clf()  # Clear the current figure
-            plt.close()  # Close the current figure
+        if plt_figure is plt:
+            plt.close()  # Close the current figure window without clearing the current figure
         else:
-            plt.close(plt_figure)  # Close the specific figure
+            try:
+                # For Figure objects
+                plt.close(plt_figure)
+            except:
+                # Fallback if closing fails
+                print(f"⚠️ Note: Could not close figure properly")
     
     # Return the file paths
     if len(saved_paths) == 2 and 'png' in formats and 'svg' in formats:
@@ -115,45 +119,32 @@ def plot_training_metrics(train_losses, val_losses, train_accs, val_accs, save_p
     plt.show()
     plt.close(fig)
 
-def visualize_predictions(model, test_loader, device, num_samples=10, save_path=None, formats=None):
+def visualize_predictions(images, labels, preds, save_path=None, formats=None):
     """
     Visualize model predictions on sample images from the test set
     
     Args:
-        model: trained model
-        test_loader: test data loader
-        device: device to run the model on
-        num_samples: number of samples to visualize
+        images: batch of image tensors (B, C, H, W)
+        labels: ground truth label tensors (B)
+        preds: prediction tensors (B)
         save_path: path to save the figure (without extension)
         formats: list of formats to save (default: ['png', 'svg'])
     """
-    model.eval()
+    # Convert tensors to numpy arrays if they're not already
+    if isinstance(images, torch.Tensor):
+        images = images.cpu().numpy()
+    if isinstance(labels, torch.Tensor):
+        labels = labels.cpu().numpy()
+    if isinstance(preds, torch.Tensor):
+        preds = preds.cpu().numpy()
     
-    # Get a batch of test images
-    dataiter = iter(test_loader)
-    images, labels = next(dataiter)
-    
-    # Limit to num_samples
-    images = images[:num_samples]
-    labels = labels[:num_samples]
-    
-    # Get predictions
-    with torch.no_grad():
-        images_device = images.to(device)
-        outputs = model(images_device)
-        _, preds = torch.max(outputs, 1)
-        probs = torch.nn.functional.softmax(outputs, dim=1)
-    
-    # Convert tensors to numpy arrays
-    images = images.cpu().numpy()
-    labels = labels.cpu().numpy()
-    preds = preds.cpu().numpy()
-    probs = probs.cpu().numpy()
+    # Get number of samples
+    num_samples = min(16, len(images))
     
     # Plot images with labels
     fig = plt.figure(figsize=(15, 10))
     for i in range(num_samples):
-        ax = fig.add_subplot(2, 5, i+1, xticks=[], yticks=[])
+        ax = fig.add_subplot(4, 4, i+1, xticks=[], yticks=[])
         
         # Convert image from tensor format to display format
         img = np.transpose(images[i], (1, 2, 0))
@@ -168,32 +159,32 @@ def visualize_predictions(model, test_loader, device, num_samples=10, save_path=
         
         # Set title color based on prediction correctness
         title_color = 'green' if preds[i] == labels[i] else 'red'
-        confidence = probs[i][preds[i]] * 100
-        ax.set_title(f"True: {IDX_TO_CLASS[labels[i]]}\nPred: {IDX_TO_CLASS[preds[i]]}\nConf: {confidence:.1f}%", 
-                    color=title_color)
+        true_label = IDX_TO_CLASS[labels[i]]
+        pred_label = IDX_TO_CLASS[preds[i]]
+        ax.set_title(f"True: {true_label}\nPred: {pred_label}", color=title_color)
     
     plt.tight_layout()
     
     if save_path:
-        save_figure(fig, save_path, formats)
+        saved_paths = save_figure(fig, save_path, formats)
         
         # Save predictions as CSV
         csv_path = f"{save_path}_predictions.csv"
         with open(csv_path, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(['sample_id', 'true_label', 'predicted_label', 'confidence', 'correct'])
+            writer.writerow(['sample_id', 'true_label', 'predicted_label', 'correct'])
             for i in range(num_samples):
                 writer.writerow([
                     i,
                     IDX_TO_CLASS[labels[i]],
                     IDX_TO_CLASS[preds[i]],
-                    f"{probs[i][preds[i]] * 100:.2f}%",
                     preds[i] == labels[i]
                 ])
         print(f"Predictions saved to {csv_path}")
+        
+        return saved_paths
     
-    plt.show()
-    plt.close(fig)
+    return fig
 
 def visualize_sample_images(train_loader, save_path=None, formats=None):
     """

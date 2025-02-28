@@ -56,3 +56,9 @@
 *.toc
 *.idx
 *.svg
+*.onnx
+*.onnx.gz
+*.onnx.bz2
+*.onnx.xz
+*.onnx.lzma
+*.onnx.lzma
