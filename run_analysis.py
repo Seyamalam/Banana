@@ -242,7 +242,7 @@ def run_deployment_metrics(model, model_name, args):
     summary_df, csv_path, plot_path = benchmark_deployment_metrics(
         model=model,
         model_name=model_name,
-        input_size=(1, 3, 128, 128),
+        input_size=(1, 3, 224, 224),
         batch_sizes=[1, 4, 8, 16, 32],
         output_dir=os.path.join(args.output_dir, 'deployment')
     )

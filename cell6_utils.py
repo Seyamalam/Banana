@@ -117,6 +117,12 @@ def evaluate_model(model, test_loader, criterion, device, save_dir=None):
     test_loss = test_loss / total
     test_acc = 100. * correct / total
     
+    # Calculate metrics
+    accuracy = accuracy_score(all_targets, all_preds)
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        all_targets, all_preds, average='weighted', zero_division=0
+    )
+    
     # Calculate confusion matrix
     cm = confusion_matrix(all_targets, all_preds)
     
@@ -518,7 +524,7 @@ def evaluate_model(model: torch.nn.Module,
     # Calculate metrics
     accuracy = accuracy_score(all_targets, all_preds)
     precision, recall, f1, _ = precision_recall_fscore_support(
-        all_targets, all_preds, average='weighted'
+        all_targets, all_preds, average='weighted', zero_division=0
     )
     
     # Calculate confusion matrix

@@ -14,7 +14,7 @@ from cell13_efficiency_metrics import count_parameters, calculate_model_size
 
 def measure_inference_latency(
     model: nn.Module,
-    input_size: Tuple[int, int, int, int] = (1, 3, 128, 128),
+    input_size: Tuple[int, int, int, int] = (1, 3, 224, 224),
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
     num_iterations: int = 100,
     warmup_iterations: int = 10
@@ -76,7 +76,7 @@ def measure_inference_latency(
 def export_to_onnx(
     model: nn.Module,
     model_name: str,
-    input_size: Tuple[int, int, int, int] = (1, 3, 128, 128),
+    input_size: Tuple[int, int, int, int] = (1, 3, 224, 224),
     output_dir: str = 'models'
 ) -> Dict[str, Any]:
     """
@@ -128,7 +128,7 @@ def export_to_onnx(
 def export_to_torchscript(
     model: nn.Module,
     model_name: str,
-    input_size: Tuple[int, int, int, int] = (1, 3, 128, 128),
+    input_size: Tuple[int, int, int, int] = (1, 3, 224, 224),
     output_dir: str = 'models'
 ) -> Dict[str, Any]:
     """
@@ -170,7 +170,7 @@ def export_to_torchscript(
 def benchmark_deployment_metrics(
     model: nn.Module,
     model_name: str,
-    input_size: Tuple[int, int, int, int] = (1, 3, 128, 128),
+    input_size: Tuple[int, int, int, int] = (1, 3, 224, 224),
     batch_sizes: List[int] = [1, 4, 8, 16, 32],
     output_dir: str = 'models'
 ) -> Tuple[pd.DataFrame, str, str]:
@@ -292,7 +292,7 @@ def benchmark_deployment_metrics(
 
 def compare_deployment_metrics(
     models: List[Dict[str, Any]],
-    input_size: Tuple[int, int, int, int] = (1, 3, 128, 128),
+    input_size: Tuple[int, int, int, int] = (1, 3, 224, 224),
     output_dir: str = 'models'
 ) -> Tuple[pd.DataFrame, str, str]:
     """

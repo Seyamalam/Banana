@@ -91,12 +91,12 @@ def calculate_advanced_efficiency_metrics(
         # Calculate combined efficiency score (higher is better)
         # Normalize each metric to 0-1 range within the dataset
         results.append({
-            'model_name': model_name,
+            'name': model_name,
             'accuracy': accuracy,
             'parameters': parameters,
-            'model_size_mb': model_size,
-            'inference_time_ms': inference_time * 1000,
-            'training_time_hours': training_time / 3600,
+            'model_size': model_size,
+            'inference_time': inference_time,
+            'training_time': training_time,
             'accuracy_per_million_params': accuracy_per_param,
             'accuracy_per_mb': accuracy_per_mb,
             'accuracy_per_inference_ms': accuracy_per_inference_ms,
@@ -174,7 +174,7 @@ def calculate_advanced_efficiency_metrics(
         values += values[:1]  # Close the loop
         
         # Plot values
-        ax.plot(angles, values, linewidth=2, linestyle='solid', label=row['model_name'])
+        ax.plot(angles, values, linewidth=2, linestyle='solid', label=row['name'])
         ax.fill(angles, values, alpha=0.1)
     
     # Add legend
@@ -187,7 +187,7 @@ def calculate_advanced_efficiency_metrics(
     
     # Create bar chart for efficiency score
     plt.figure(figsize=(12, 6))
-    plt.bar(df['model_name'], df['efficiency_score'])
+    plt.bar(df['name'], df['efficiency_score'])
     plt.xlabel('Model')
     plt.ylabel('Efficiency Score')
     plt.title('Combined Efficiency Score (higher is better)')
@@ -209,7 +209,7 @@ def calculate_advanced_efficiency_metrics(
 
 def calculate_pareto_frontier(
     model_results: List[Dict[str, Any]],
-    x_metric: str = 'model_size_mb',
+    x_metric: str = 'model_size',
     y_metric: str = 'accuracy',
     output_dir: str = "models"
 ) -> Tuple[pd.DataFrame, str, str]:
@@ -284,7 +284,7 @@ def calculate_pareto_frontier(
     # Add model names as annotations
     for _, row in df.iterrows():
         plt.annotate(
-            row['model_name'], 
+            row['name'], 
             (row[x_metric], row[y_metric]),
             xytext=(5, 5),
             textcoords='offset points'
@@ -320,10 +320,10 @@ def calculate_efficiency_frontier(
     """
     # Define metric pairs (x_metric: lower is better, y_metric: higher is better)
     metric_pairs = [
-        ('model_size_mb', 'accuracy'),
-        ('inference_time_ms', 'accuracy'),
+        ('model_size', 'accuracy'),
+        ('inference_time', 'accuracy'),
         ('parameters', 'accuracy'),
-        ('training_time_hours', 'accuracy')
+        ('training_time', 'accuracy')
     ]
     
     results = {}

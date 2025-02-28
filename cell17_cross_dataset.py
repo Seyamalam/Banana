@@ -172,7 +172,7 @@ def evaluate_cross_dataset(
         # Calculate metrics
         accuracy = accuracy_score(all_targets, all_preds)
         precision, recall, f1, _ = precision_recall_fscore_support(
-            all_targets, all_preds, average='weighted'
+            all_targets, all_preds, average='weighted', zero_division=0
         )
         
         # Store results
@@ -307,7 +307,7 @@ def compare_cross_dataset_performance(
             # Calculate metrics
             accuracy = accuracy_score(all_targets, all_preds)
             precision, recall, f1, _ = precision_recall_fscore_support(
-                all_targets, all_preds, average='weighted'
+                all_targets, all_preds, average='weighted', zero_division=0
             )
             
             # Store results

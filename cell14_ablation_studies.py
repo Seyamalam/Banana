@@ -61,32 +61,36 @@ class AblationStudy:
         
     def _train_and_evaluate(self, model: nn.Module, variant_name: str) -> Dict[str, Any]:
         """
-        Train and evaluate a model variant.
+        Train and evaluate a model variant
         
         Args:
             model: Model variant to train and evaluate
             variant_name: Name of the variant
             
         Returns:
-            Dictionary with training and evaluation results
+            Dictionary of training results
         """
+        # Move model to device
         model = model.to(self.device)
+        
+        # Setup optimizer
         optimizer = self.optimizer_fn(model.parameters(), lr=self.lr)
         
-        # Track training time
-        start_time = time.time()
-        
-        # Train the model
+        # Training loop
+        best_val_acc = 0.0
         train_losses = []
         val_losses = []
         train_accs = []
         val_accs = []
         
+        # Initialize start_time to measure training duration
+        start_time = time.time()
+        
         for epoch in range(self.epochs):
             train_loss, train_acc = train(
                 model, self.train_loader, self.criterion, optimizer, self.device
             )
-            val_loss, val_acc = validate(
+            val_loss, val_acc, val_report = validate(
                 model, self.val_loader, self.criterion, self.device
             )
             
