@@ -13,38 +13,53 @@ import csv
 
 from cell1_imports_and_constants import CLASS_NAMES, IDX_TO_CLASS, NUM_CLASSES
 
-def save_figure(fig, save_path=None, formats=None):
+def save_figure(
+    plt_figure, 
+    base_filename, 
+    formats=['png', 'svg'],
+    dpi=300,
+    close_after=True
+):
     """
-    Save figure in multiple formats
+    Save a matplotlib figure in multiple formats.
     
     Args:
-        fig: matplotlib figure object
-        save_path: path to save the figure (without extension)
-        formats: list of formats to save (default: ['png', 'svg'])
+        plt_figure: Matplotlib figure or pyplot module
+        base_filename: Base filename without extension
+        formats: List of formats to save (e.g., ['png', 'svg'])
+        dpi: Resolution for raster formats
+        close_after: Whether to close the figure after saving
         
     Returns:
-        Tuple of paths to saved files (png_path, svg_path) or None if save_path is None
+        List of saved file paths, one for each format
     """
-    if save_path is None:
-        return None
+    saved_paths = []
     
-    if formats is None:
-        formats = ['png', 'svg']
-    
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    
-    saved_paths = {}
     for fmt in formats:
-        full_path = f"{save_path}.{fmt}"
-        fig.savefig(full_path, format=fmt, bbox_inches='tight', dpi=300)
-        print(f"Figure saved to {full_path}")
-        saved_paths[fmt] = full_path
+        filename = f"{base_filename}.{fmt}"
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        
+        # Save the figure
+        plt_figure.savefig(filename, dpi=dpi, bbox_inches='tight')
+        saved_paths.append(filename)
+        print(f"Figure saved to {filename}")
     
-    # Return png_path and svg_path if available, otherwise None
-    png_path = saved_paths.get('png', None)
-    svg_path = saved_paths.get('svg', None)
+    if close_after:
+        # Handle both Figure objects and pyplot module
+        if plt_figure == plt:
+            plt.clf()  # Clear the current figure
+            plt.close()  # Close the current figure
+        else:
+            plt.close(plt_figure)  # Close the specific figure
     
-    return png_path, svg_path
+    # Return the file paths
+    if len(saved_paths) == 2 and 'png' in formats and 'svg' in formats:
+        png_path = next((path for path in saved_paths if path.endswith('.png')), None)
+        svg_path = next((path for path in saved_paths if path.endswith('.svg')), None)
+        return png_path, svg_path
+    else:
+        return saved_paths
 
 def plot_training_metrics(train_losses, val_losses, train_accs, val_accs, save_path=None, formats=None):
     """
@@ -468,66 +483,81 @@ def visualize_model_architecture(model, input_size=(3, 224, 224), save_path=None
     
     return model_summary
 
-def plot_class_distribution(train_loader, test_loader, save_path=None, formats=None):
+def plot_class_distribution(
+    train_labels, 
+    test_loader=None, 
+    save_path=None, 
+    formats=None
+):
     """
-    Plot class distribution in training and test sets
+    Plot class distribution in train and test sets
     
     Args:
-        train_loader: training data loader
-        test_loader: test data loader
-        save_path: path to save the figure (without extension)
-        formats: list of formats to save (default: ['png', 'svg'])
+        train_labels: List of labels in training set
+        test_loader: DataLoader for test set (optional)
+        save_path: Path to save the figure (without extension)
+        formats: List of formats to save (default: ['png', 'svg'])
+    
+    Returns:
+        Path to saved figure or None if save_path is None
     """
-    # Count classes in training set
-    train_counts = {i: 0 for i in range(NUM_CLASSES)}
-    for _, labels in train_loader:
-        for label in labels:
-            train_counts[label.item()] += 1
+    if formats is None:
+        formats = ['png', 'svg']
     
-    # Count classes in test set
-    test_counts = {i: 0 for i in range(NUM_CLASSES)}
-    for _, labels in test_loader:
-        for label in labels:
-            test_counts[label.item()] += 1
+    # Count class frequencies in train set
+    train_class_counts = {}
+    for label in train_labels:
+        if label not in train_class_counts:
+            train_class_counts[label] = 0
+        train_class_counts[label] += 1
     
-    # Prepare data for plotting
-    class_names = [IDX_TO_CLASS[i] for i in range(NUM_CLASSES)]
-    train_values = [train_counts[i] for i in range(NUM_CLASSES)]
-    test_values = [test_counts[i] for i in range(NUM_CLASSES)]
+    # Sort by class index
+    train_class_counts = {k: train_class_counts.get(k, 0) for k in sorted(train_class_counts.keys())}
     
-    # Create figure
-    fig, ax = plt.subplots(figsize=(12, 6))
+    # Get class names
+    class_names = [IDX_TO_CLASS.get(i, f"Class {i}") for i in train_class_counts.keys()]
     
-    x = np.arange(len(class_names))
-    width = 0.35
+    # Create bar chart
+    plt.figure(figsize=(12, 6))
     
-    ax.bar(x - width/2, train_values, width, label='Training Set')
-    ax.bar(x + width/2, test_values, width, label='Test Set')
+    # Plot train set distribution
+    plt.bar(
+        [str(name) for name in class_names], 
+        list(train_class_counts.values()),
+        label='Training Set'
+    )
     
-    ax.set_xlabel('Class')
-    ax.set_ylabel('Number of Samples')
-    ax.set_title('Class Distribution in Training and Test Sets')
-    ax.set_xticks(x)
-    ax.set_xticklabels(class_names, rotation=45, ha='right')
-    ax.legend()
+    # Plot test set distribution if provided
+    if test_loader is not None:
+        # Count class frequencies in test set
+        test_class_counts = {}
+        for _, labels in test_loader:
+            for label in labels:
+                label_idx = label.item()
+                if label_idx not in test_class_counts:
+                    test_class_counts[label_idx] = 0
+                test_class_counts[label_idx] += 1
+        
+        # Sort by class index
+        test_class_counts = {k: test_class_counts.get(k, 0) for k in sorted(test_class_counts.keys())}
+        
+        # Plot test set distribution
+        plt.bar(
+            [str(name) for name in class_names], 
+            list(test_class_counts.values()),
+            alpha=0.7,
+            label='Test Set'
+        )
     
+    plt.xlabel('Class')
+    plt.ylabel('Number of Images')
+    plt.title('Class Distribution')
+    plt.xticks(rotation=45, ha='right')
+    plt.legend()
     plt.tight_layout()
     
-    if save_path:
-        save_figure(fig, save_path, formats)
-        
-        # Save distribution as CSV
-        csv_path = f"{save_path}_distribution.csv"
-        dist_df = pd.DataFrame({
-            'class': class_names,
-            'train_count': train_values,
-            'test_count': test_values
-        })
-        dist_df.to_csv(csv_path, index=False)
-        print(f"Class distribution saved to {csv_path}")
-    
-    plt.show()
-    plt.close(fig)
+    # Save figure
+    return save_figure(plt, save_path, formats)
 
 def save_classification_report(report, save_path):
     """

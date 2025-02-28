@@ -676,7 +676,17 @@ def change_normalization(model: nn.Module, norm_type: str) -> nn.Module:
                 else:  # nn.BatchNorm3d or nn.InstanceNorm3d
                     new_norm = nn.InstanceNorm3d(num_features)
             elif norm_type == 'layer':
-                new_norm = nn.LayerNorm(num_features)
+                if isinstance(module, nn.BatchNorm1d) or isinstance(module, nn.InstanceNorm1d):
+                    # For 1D, LayerNorm needs the feature dimension
+                    new_norm = nn.LayerNorm(num_features)
+                elif isinstance(module, nn.BatchNorm2d) or isinstance(module, nn.InstanceNorm2d):
+                    # For 2D convolutions, we can't directly replace with LayerNorm
+                    # Using GroupNorm with one group per channel as a better alternative
+                    # This is more compatible with conv layers than LayerNorm
+                    new_norm = nn.GroupNorm(num_groups=num_features, num_channels=num_features)
+                else:  # nn.BatchNorm3d or nn.InstanceNorm3d
+                    # For 3D, also use GroupNorm as a more compatible alternative
+                    new_norm = nn.GroupNorm(num_groups=num_features, num_channels=num_features)
             elif norm_type == 'none':
                 new_norm = nn.Identity()
             else:
