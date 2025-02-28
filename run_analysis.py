@@ -3,6 +3,7 @@ import argparse
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+import numpy as np
 
 # Import modules
 from cell1_imports_and_constants import set_seed, NUM_CLASSES
@@ -27,6 +28,17 @@ from cell8_model_zoo import (
     build_shufflenet_v2,
     get_available_classification_models,
     create_model_adapter
+)
+
+from cell5_visualization import (
+    plot_confusion_matrix, 
+    visualize_predictions, 
+    save_classification_report, 
+    plot_roc_curve, 
+    plot_precision_recall_curve,
+    visualize_model_architecture,
+    plot_training_metrics,
+    plot_class_distribution
 )
 
 
@@ -79,7 +91,22 @@ def train_model(model, model_name, train_loader, val_loader, args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     
     # Create output directory
-    os.makedirs(args.output_dir, exist_ok=True)
+    model_dir = os.path.join(args.output_dir, model_name)
+    os.makedirs(model_dir, exist_ok=True)
+    
+    # Create training metrics directory
+    metrics_dir = os.path.join(model_dir, 'training')
+    os.makedirs(metrics_dir, exist_ok=True)
+    
+    # Plot class distribution before training
+    try:
+        all_labels = []
+        for _, labels in train_loader:
+            all_labels.extend(labels.numpy())
+        dist_path = os.path.join(metrics_dir, f"{model_name}_class_distribution")
+        plot_class_distribution(all_labels, save_path=dist_path, formats=['png', 'svg'])
+    except Exception as e:
+        print(f"Warning: Could not plot class distribution: {e}")
     
     # Training loop with resource tracking
     def training_function(model, train_loader, val_loader, criterion, optimizer, device, epochs):
@@ -114,6 +141,17 @@ def train_model(model, model_name, train_loader, val_loader, args):
         save_checkpoint(model, optimizer, epochs-1, val_acc, 
                        os.path.join(args.output_dir, f"{model_name}_final.pt"))
         
+        # Plot training metrics
+        metrics_path = os.path.join(metrics_dir, f"{model_name}_training_metrics")
+        plot_training_metrics(
+            train_losses=train_losses,
+            val_losses=val_losses,
+            train_accs=train_accs,
+            val_accs=val_accs,
+            save_path=metrics_path,
+            formats=['png', 'svg']
+        )
+        
         return {
             'train_losses': train_losses,
             'val_losses': val_losses,
@@ -140,6 +178,7 @@ def evaluate_models(models, model_names, test_loader, args):
     results = []
     
     for model, model_name in zip(models, model_names):
+        print(f"Evaluating {model_name}...")
         model = model.to(device)
         model.eval()
         
@@ -154,10 +193,85 @@ def evaluate_models(models, model_names, test_loader, args):
             'recall': metrics['recall'],
             'f1': metrics['f1'],
             'y_true': y_true,
-            'y_pred': y_pred
+            'y_pred': y_pred,
+            'confusion_matrix': metrics['confusion_matrix']
         })
         
+        # Create evaluation output directory
+        eval_dir = os.path.join(args.output_dir, 'evaluation', model_name)
+        os.makedirs(eval_dir, exist_ok=True)
+        
+        # Plot and save confusion matrix
+        cm_path = os.path.join(eval_dir, f"{model_name}_confusion_matrix")
+        plot_confusion_matrix(metrics['confusion_matrix'], cm_path, formats=['png', 'svg'])
+        
+        # Generate classification report
+        from sklearn.metrics import classification_report
+        from cell1_imports_and_constants import IDX_TO_CLASS
+        report = classification_report(y_true, y_pred, target_names=[IDX_TO_CLASS[i] for i in range(len(IDX_TO_CLASS))], zero_division=0)
+        
+        # Save classification report
+        report_path = os.path.join(eval_dir, f"{model_name}_classification_report.csv")
+        save_classification_report(report, report_path)
+        
+        # Visualize sample predictions
+        try:
+            # Get a batch of test data
+            test_iterator = iter(test_loader)
+            images, labels = next(test_iterator)
+            
+            # Make predictions
+            model.eval()
+            with torch.no_grad():
+                outputs = model(images.to(device))
+                _, preds = torch.max(outputs, 1)
+            
+            # Visualize predictions
+            vis_path = os.path.join(eval_dir, f"{model_name}_predictions")
+            visualize_predictions(images[:16], labels[:16], preds[:16].cpu(), vis_path, formats=['png', 'svg'])
+        except Exception as e:
+            print(f"Warning: Could not visualize predictions: {e}")
+            
+        # Generate ROC curve and precision-recall curve if we have probabilities
+        try:
+            # Get probabilities for a batch of test data
+            all_probs = []
+            all_labels = []
+            with torch.no_grad():
+                for batch_images, batch_labels in test_loader:
+                    batch_images = batch_images.to(device)
+                    outputs = model(batch_images)
+                    probs = torch.nn.functional.softmax(outputs, dim=1)
+                    all_probs.extend(probs.cpu().numpy())
+                    all_labels.extend(batch_labels.numpy())
+                    
+                    # Limit to max 1000 samples for efficiency
+                    if len(all_probs) > 1000:
+                        break
+            
+            # Convert to numpy arrays
+            all_probs = np.array(all_probs)
+            all_labels = np.array(all_labels)
+            
+            # Generate ROC curve
+            roc_path = os.path.join(eval_dir, f"{model_name}_roc_curve")
+            plot_roc_curve(all_probs, all_labels, roc_path, formats=['png', 'svg'])
+            
+            # Generate precision-recall curve
+            pr_path = os.path.join(eval_dir, f"{model_name}_precision_recall_curve")
+            plot_precision_recall_curve(all_probs, all_labels, pr_path, formats=['png', 'svg'])
+        except Exception as e:
+            print(f"Warning: Could not generate ROC or PR curves: {e}")
+        
+        # Visualize model architecture
+        try:
+            arch_path = os.path.join(eval_dir, f"{model_name}_architecture")
+            visualize_model_architecture(model, save_path=arch_path, formats=['png', 'svg'])
+        except Exception as e:
+            print(f"Warning: Could not visualize model architecture: {e}")
+        
         print(f"{model_name} - Accuracy: {metrics['accuracy']:.4f}, F1: {metrics['f1']:.4f}")
+        print(f"Evaluation results saved to {eval_dir}")
     
     # Statistical significance testing
     if len(results) > 1:
@@ -375,7 +489,8 @@ def main():
                 'recall': 0.0,
                 'f1': 0.0,
                 'y_true': [],
-                'y_pred': []
+                'y_pred': [],
+                'confusion_matrix': []
             })
     
     # Run ablation studies
