@@ -90,7 +90,7 @@ def train_model(model, model_name, train_loader, val_loader, args):
             train_accs.append(train_acc)
             
             # Validate
-            val_loss, val_acc = validate(model, val_loader, criterion, device)
+            val_loss, val_acc, val_report = validate(model, val_loader, criterion, device)
             val_losses.append(val_loss)
             val_accs.append(val_acc)
             

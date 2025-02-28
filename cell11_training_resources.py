@@ -108,7 +108,7 @@ class ResourceTracker:
         Plot memory usage over time and save as PNG and SVG.
         
         Returns:
-            Tuple of paths to saved PNG and SVG files
+            Tuple of paths to saved PNG and SVG files, or (None, None) if files weren't saved
         """
         plt.figure(figsize=(10, 6))
         plt.plot(self.timestamps, self.memory_usage, label='CPU Memory (MB)')
@@ -124,7 +124,13 @@ class ResourceTracker:
         
         # Save figure in multiple formats
         base_filename = os.path.join(self.output_dir, f"{self.model_name}_memory_usage")
-        return save_figure(plt, base_filename, formats=['png', 'svg'])
+        paths = save_figure(plt, base_filename, formats=['png', 'svg'])
+        
+        # If save_figure returns None, provide default return values
+        if paths is None:
+            return None, None
+        
+        return paths
 
 
 def measure_training_resources(model_name: str, train_function, *args, **kwargs) -> Dict[str, Any]:
@@ -142,18 +148,31 @@ def measure_training_resources(model_name: str, train_function, *args, **kwargs)
     tracker = ResourceTracker(model_name)
     tracker.start()
     
-    # Set up a hook to update resource tracking after each batch
-    original_batch_end = kwargs.get('on_batch_end', None)
+    # Create a simple wrapper that updates resources periodically during training
+    # without requiring changes to the original training function
+    import threading
     
-    def on_batch_end_hook(*batch_args, **batch_kwargs):
-        tracker.update()
-        if original_batch_end:
-            original_batch_end(*batch_args, **batch_kwargs)
+    # Flag to control the resource tracking thread
+    tracking_active = True
     
-    kwargs['on_batch_end'] = on_batch_end_hook
+    # Create a thread that updates resource tracking every second
+    def resource_tracking_thread():
+        while tracking_active:
+            tracker.update()
+            time.sleep(1.0)  # Update every second
     
-    # Run the training function
-    result = train_function(*args, **kwargs)
+    # Start the resource tracking thread
+    tracking_thread = threading.Thread(target=resource_tracking_thread)
+    tracking_thread.daemon = True
+    tracking_thread.start()
+    
+    try:
+        # Run the training function with original arguments
+        result = train_function(*args, **kwargs)
+    finally:
+        # Stop the resource tracking thread
+        tracking_active = False
+        tracking_thread.join(timeout=2.0)  # Wait for the thread to finish
     
     # Stop tracking and get metrics
     metrics = tracker.stop()
@@ -163,8 +182,14 @@ def measure_training_resources(model_name: str, train_function, *args, **kwargs)
     print(f"Resource metrics saved to {csv_path}")
     
     # Plot memory usage
-    png_path, svg_path = tracker.plot_memory_usage()
-    print(f"Memory usage plot saved to {png_path} and {svg_path}")
+    try:
+        png_path, svg_path = tracker.plot_memory_usage()
+        if png_path and svg_path:
+            print(f"Memory usage plot saved to {png_path} and {svg_path}")
+        else:
+            print("Memory usage plot could not be saved")
+    except Exception as e:
+        print(f"Error plotting memory usage: {e}")
     
     return metrics
 

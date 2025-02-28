@@ -21,19 +21,30 @@ def save_figure(fig, save_path=None, formats=None):
         fig: matplotlib figure object
         save_path: path to save the figure (without extension)
         formats: list of formats to save (default: ['png', 'svg'])
+        
+    Returns:
+        Tuple of paths to saved files (png_path, svg_path) or None if save_path is None
     """
     if save_path is None:
-        return
+        return None
     
     if formats is None:
         formats = ['png', 'svg']
     
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     
+    saved_paths = {}
     for fmt in formats:
         full_path = f"{save_path}.{fmt}"
         fig.savefig(full_path, format=fmt, bbox_inches='tight', dpi=300)
         print(f"Figure saved to {full_path}")
+        saved_paths[fmt] = full_path
+    
+    # Return png_path and svg_path if available, otherwise None
+    png_path = saved_paths.get('png', None)
+    svg_path = saved_paths.get('svg', None)
+    
+    return png_path, svg_path
 
 def plot_training_metrics(train_losses, val_losses, train_accs, val_accs, save_path=None, formats=None):
     """

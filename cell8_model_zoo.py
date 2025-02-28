@@ -223,3 +223,96 @@ def load_pretrained_models(model_names=None, device='cpu'):
             print(f"  - Error loading {name}: {e}")
     
     return models 
+
+def build_mobilenet_v2(num_classes: int = NUM_CLASSES, pretrained: bool = True) -> nn.Module:
+    """
+    Build a MobileNetV2 model for banana leaf classification.
+    
+    Args:
+        num_classes: Number of output classes
+        pretrained: Whether to use pretrained weights
+        
+    Returns:
+        MobileNetV2 model
+    """
+    weights = models.MobileNet_V2_Weights.DEFAULT if pretrained else None
+    model = models.mobilenet_v2(weights=weights)
+    
+    # Modify the classifier for our number of classes
+    in_features = model.classifier[1].in_features
+    model.classifier[1] = nn.Linear(in_features, num_classes)
+    
+    return model
+
+def build_efficientnet_b0(num_classes: int = NUM_CLASSES, pretrained: bool = True) -> nn.Module:
+    """
+    Build an EfficientNet-B0 model for banana leaf classification.
+    
+    Args:
+        num_classes: Number of output classes
+        pretrained: Whether to use pretrained weights
+        
+    Returns:
+        EfficientNet-B0 model
+    """
+    weights = models.EfficientNet_B0_Weights.DEFAULT if pretrained else None
+    model = models.efficientnet_b0(weights=weights)
+    
+    # Modify the classifier for our number of classes
+    in_features = model.classifier[1].in_features
+    model.classifier[1] = nn.Linear(in_features, num_classes)
+    
+    return model
+
+def build_resnet18(num_classes: int = NUM_CLASSES, pretrained: bool = True) -> nn.Module:
+    """
+    Build a ResNet-18 model for banana leaf classification.
+    
+    Args:
+        num_classes: Number of output classes
+        pretrained: Whether to use pretrained weights
+        
+    Returns:
+        ResNet-18 model
+    """
+    weights = models.ResNet18_Weights.DEFAULT if pretrained else None
+    model = models.resnet18(weights=weights)
+    
+    # Modify the fully connected layer for our number of classes
+    in_features = model.fc.in_features
+    model.fc = nn.Linear(in_features, num_classes)
+    
+    return model
+
+def build_shufflenet_v2(num_classes: int = NUM_CLASSES, pretrained: bool = True, size: str = "x1_0") -> nn.Module:
+    """
+    Build a ShuffleNetV2 model for banana leaf classification.
+    
+    Args:
+        num_classes: Number of output classes
+        pretrained: Whether to use pretrained weights
+        size: Model size (x0_5, x1_0, x1_5, x2_0)
+        
+    Returns:
+        ShuffleNetV2 model
+    """
+    if size == "x0_5":
+        weights = models.ShuffleNet_V2_X0_5_Weights.DEFAULT if pretrained else None
+        model = models.shufflenet_v2_x0_5(weights=weights)
+    elif size == "x1_0":
+        weights = models.ShuffleNet_V2_X1_0_Weights.DEFAULT if pretrained else None
+        model = models.shufflenet_v2_x1_0(weights=weights)
+    elif size == "x1_5":
+        weights = models.ShuffleNet_V2_X1_5_Weights.DEFAULT if pretrained else None
+        model = models.shufflenet_v2_x1_5(weights=weights)
+    elif size == "x2_0":
+        weights = models.ShuffleNet_V2_X2_0_Weights.DEFAULT if pretrained else None
+        model = models.shufflenet_v2_x2_0(weights=weights)
+    else:
+        raise ValueError(f"Invalid size: {size}. Must be one of: x0_5, x1_0, x1_5, x2_0")
+    
+    # Modify the fully connected layer for our number of classes
+    in_features = model.fc.in_features
+    model.fc = nn.Linear(in_features, num_classes)
+    
+    return model 
