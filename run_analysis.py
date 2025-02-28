@@ -30,7 +30,10 @@ from cell8_model_zoo import (
     build_resnet18, 
     build_shufflenet_v2,
     get_available_classification_models,
-    create_model_adapter
+    create_model_adapter,
+    ModelInfo,
+    get_model_info_from_model,
+    load_pretrained_models
 )
 
 from cell5_visualization import (
@@ -64,6 +67,7 @@ def parse_args():
     parser.add_argument('--robustness', action='store_true', help='Run robustness tests')
     parser.add_argument('--deployment', action='store_true', help='Run deployment metrics')
     parser.add_argument('--all', action='store_true', help='Run all analyses')
+    parser.add_argument('--load_all_models', action='store_true', help='Load all available models for comparison')
     
     # Model selection
     available_models = ['banana_leaf_cnn'] + get_available_classification_models() + ['mobilenet_v2', 'efficientnet_b0', 'resnet18', 'shufflenet_v2']
@@ -858,14 +862,64 @@ def save_comprehensive_comparison(models, model_names, evaluation_results, deplo
     comparison_dir = os.path.join(args.output_dir, 'comparisons')
     os.makedirs(comparison_dir, exist_ok=True)
     
+    # Use ModelInfo to get structured information about each model
+    from cell8_model_zoo import ModelInfo, get_model_info_from_model
+    
+    # List to store detailed model information
+    model_info_list = []
+    
     # Build comparison dataframe with evaluation metrics
     comparison_data = []
     for i, (model, model_name) in enumerate(zip(models, model_names)):
-        # Basic model info
+        # Get structured model info
+        model_type = 'custom' if model_name == 'banana_leaf_cnn' else 'pretrained'
+        model_info = get_model_info_from_model(model, model_type=model_type)
+        
+        # Add evaluation metrics to ModelInfo if available
+        if i < len(evaluation_results):
+            result = evaluation_results[i]
+            model_info.accuracy = result['accuracy']
+            model_info.loss = None  # We don't have loss in evaluation results
+            
+            # Add per-class accuracies if we have them
+            if 'confusion_matrix' in result:
+                cm = result['confusion_matrix']
+                from cell1_imports_and_constants import IDX_TO_CLASS
+                class_names = [IDX_TO_CLASS[i] for i in range(len(IDX_TO_CLASS))]
+                
+                # Calculate per-class accuracies from confusion matrix
+                # Diagonal elements are correct predictions for each class
+                class_accuracies = {}
+                cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+                for class_idx, class_name in enumerate(class_names):
+                    if class_idx < len(cm_norm) and cm_norm[class_idx].sum() > 0:
+                        class_accuracies[class_name] = cm_norm[class_idx, class_idx]
+                    else:
+                        class_accuracies[class_name] = 0.0
+                
+                model_info.class_accuracies = class_accuracies
+        
+        # Add deployment metrics if available
+        if deployment_results and i < len(deployment_results):
+            try:
+                deploy_df = deployment_results[i]
+                # Add inference time if available
+                latency_cols = [col for col in deploy_df.columns if 'latency' in col.lower() or 'time' in col.lower()]
+                if latency_cols:
+                    latency_col = latency_cols[0]
+                    model_info.inference_time = deploy_df[latency_col].mean()
+            except Exception as e:
+                print(f"Warning: Could not add inference time for {model_name}: {e}")
+        
+        # Add to model info list
+        model_info_list.append(model_info)
+        
+        # Basic model info for main comparison dataframe
         model_data = {
             'Model': model_name,
-            'Parameters': sum(p.numel() for p in model.parameters() if p.requires_grad),
-            'Size (MB)': calculate_model_size(model)
+            'Parameters': model_info.params,
+            'Trainable Parameters': model_info.trainable_params,
+            'Size (MB)': model_info.model_size_mb
         }
         
         # Add evaluation metrics
@@ -882,11 +936,24 @@ def save_comprehensive_comparison(models, model_names, evaluation_results, deplo
             try:
                 deploy_df = deployment_results[i]
                 # Get metrics for batch size 1 (inference speed)
-                deploy_row = deploy_df[deploy_df['batch_size'] == 1].iloc[0]
-                model_data.update({
-                    'Inference Time (ms)': deploy_row['inference_time_ms'],
-                    'Memory Usage (MB)': deploy_row['memory_usage_mb']
-                })
+                if 'batch_size' in deploy_df.columns:
+                    deploy_row = deploy_df[deploy_df['batch_size'] == 1].iloc[0]
+                    inference_time_col = next((col for col in deploy_df.columns if 'inference_time' in col or 'latency' in col), None)
+                    memory_usage_col = next((col for col in deploy_df.columns if 'memory' in col), None)
+                    
+                    if inference_time_col:
+                        model_data['Inference Time (ms)'] = deploy_row[inference_time_col]
+                    if memory_usage_col:
+                        model_data['Memory Usage (MB)'] = deploy_row[memory_usage_col]
+                else:
+                    # If no batch_size column, use mean values for available metrics
+                    inference_time_col = next((col for col in deploy_df.columns if 'inference_time' in col or 'latency' in col), None)
+                    memory_usage_col = next((col for col in deploy_df.columns if 'memory' in col), None)
+                    
+                    if inference_time_col:
+                        model_data['Inference Time (ms)'] = deploy_df[inference_time_col].mean()
+                    if memory_usage_col:
+                        model_data['Memory Usage (MB)'] = deploy_df[memory_usage_col].mean()
             except (IndexError, KeyError) as e:
                 print(f"Warning: Could not add deployment metrics for {model_name}: {e}")
         
@@ -900,6 +967,43 @@ def save_comprehensive_comparison(models, model_names, evaluation_results, deplo
     comparison_df.to_csv(comprehensive_csv, index=False)
     print(f"Comprehensive model comparison saved to {comprehensive_csv}")
     
+    # Save detailed model info as JSON
+    model_info_data = [model_info.to_dict() for model_info in model_info_list]
+    model_info_df = pd.DataFrame(model_info_data)
+    model_info_csv = os.path.join(comparison_dir, "detailed_model_info.csv")
+    model_info_df.to_csv(model_info_csv, index=False)
+    print(f"Detailed model information saved to {model_info_csv}")
+    
+    # Generate class-wise accuracy comparison if class accuracies are available
+    class_accuracy_data = []
+    for model_info in model_info_list:
+        if model_info.class_accuracies:
+            for class_name, accuracy in model_info.class_accuracies.items():
+                class_accuracy_data.append({
+                    'Model': model_info.model_name,
+                    'Class': class_name,
+                    'Accuracy': accuracy
+                })
+    
+    if class_accuracy_data:
+        class_acc_df = pd.DataFrame(class_accuracy_data)
+        class_acc_csv = os.path.join(comparison_dir, "class_accuracy_comparison.csv")
+        class_acc_df.to_csv(class_acc_csv, index=False)
+        
+        # Generate heatmap of class accuracies
+        try:
+            plt.figure(figsize=(12, 8))
+            class_acc_pivot = class_acc_df.pivot(index='Class', columns='Model', values='Accuracy')
+            sns.heatmap(class_acc_pivot, annot=True, cmap='Blues', fmt='.2f')
+            plt.title('Class-wise Accuracy Comparison')
+            plt.tight_layout()
+            
+            heatmap_path = os.path.join(comparison_dir, "class_accuracy_heatmap")
+            save_figure(plt, heatmap_path, formats=['png', 'svg'])
+            print(f"Class-wise accuracy comparison saved to {class_acc_csv}")
+        except Exception as e:
+            print(f"Warning: Could not generate class accuracy heatmap: {e}")
+    
     # Create radar chart for model comparison (if we have at least 2 models)
     if len(model_names) >= 2:
         try:
@@ -909,7 +1013,7 @@ def save_comprehensive_comparison(models, model_names, evaluation_results, deplo
                 # Normalize values between 0 and 1 for each metric
                 norm_df = comparison_df.copy()
                 for col in numeric_cols:
-                    if col in ['Inference Time (ms)', 'Size (MB)', 'Parameters']:
+                    if 'inference' in col.lower() or 'size' in col.lower() or 'parameters' in col.lower():
                         # For these metrics, lower is better, so invert the normalization
                         max_val = norm_df[col].max()
                         min_val = norm_df[col].min()
@@ -927,7 +1031,7 @@ def save_comprehensive_comparison(models, model_names, evaluation_results, deplo
                 ax = fig.add_subplot(111, polar=True)
                 
                 # Select a subset of metrics for clearer visualization
-                radar_metrics = ['Accuracy', 'F1 Score', 'Size (MB)', 'Parameters']
+                radar_metrics = ['Accuracy', 'F1 Score', 'Size (MB)', 'Parameters', 'Inference Time (ms)']
                 radar_metrics = [m for m in radar_metrics if m in norm_df.columns]
                 
                 # Number of variables
@@ -1561,36 +1665,67 @@ def main():
     models = []
     model_names = []
     
-    for model_name in args.models:
-        try:
-            if model_name == 'banana_leaf_cnn':
+    # If load_all_models is specified, use the load_pretrained_models function
+    # to load all available models for comparison
+    if args.load_all_models:
+        print("\n📊 Loading all available models for comparison...")
+        from cell8_model_zoo import load_pretrained_models
+        
+        # Get device
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Load all available pretrained models
+        pretrained_models = load_pretrained_models(device=device)
+        
+        # Add custom models if specified
+        if 'banana_leaf_cnn' in args.models:
+            try:
                 model = BananaLeafCNN()
-                print(f"✅ Initialized {model_name}")
-            elif model_name == 'mobilenet_v2':
-                model = build_mobilenet_v2(num_classes=NUM_CLASSES)
-                print(f"✅ Initialized {model_name}")
-            elif model_name == 'efficientnet_b0':
-                model = build_efficientnet_b0(num_classes=NUM_CLASSES)
-                print(f"✅ Initialized {model_name}")
-            elif model_name == 'resnet18':
-                model = build_resnet18(num_classes=NUM_CLASSES)
-                print(f"✅ Initialized {model_name}")
-            elif model_name == 'shufflenet_v2':
-                model = build_shufflenet_v2(num_classes=NUM_CLASSES)
-                print(f"✅ Initialized {model_name}")
-            else:
-                # Other models from the model zoo
-                model_adapter, _ = create_model_adapter(model_name, pretrained=True, freeze_backbone=False)
-                if model_adapter is None:
-                    print(f"⚠️ Warning: Failed to create model {model_name}. Skipping.")
-                    continue
-                model = model_adapter
-                print(f"✅ Initialized {model_name}")
-            
+                model = model.to(device)
+                print(f"✅ Initialized banana_leaf_cnn")
+                models.append(model)
+                model_names.append('banana_leaf_cnn')
+            except Exception as e:
+                print(f"❌ Error initializing banana_leaf_cnn: {e}")
+        
+        # Add pretrained models to our lists
+        for name, (model, _) in pretrained_models.items():
             models.append(model)
-            model_names.append(model_name)
-        except Exception as e:
-            print(f"❌ Error initializing model {model_name}: {e}")
+            model_names.append(name)
+            
+        print(f"✅ Loaded {len(models)} models for comparison")
+    else:
+        # Initialize models normally as specified by the user
+        for model_name in args.models:
+            try:
+                if model_name == 'banana_leaf_cnn':
+                    model = BananaLeafCNN()
+                    print(f"✅ Initialized {model_name}")
+                elif model_name == 'mobilenet_v2':
+                    model = build_mobilenet_v2(num_classes=NUM_CLASSES)
+                    print(f"✅ Initialized {model_name}")
+                elif model_name == 'efficientnet_b0':
+                    model = build_efficientnet_b0(num_classes=NUM_CLASSES)
+                    print(f"✅ Initialized {model_name}")
+                elif model_name == 'resnet18':
+                    model = build_resnet18(num_classes=NUM_CLASSES)
+                    print(f"✅ Initialized {model_name}")
+                elif model_name == 'shufflenet_v2':
+                    model = build_shufflenet_v2(num_classes=NUM_CLASSES)
+                    print(f"✅ Initialized {model_name}")
+                else:
+                    # Other models from the model zoo
+                    model_adapter, _ = create_model_adapter(model_name, pretrained=True, freeze_backbone=False)
+                    if model_adapter is None:
+                        print(f"⚠️ Warning: Failed to create model {model_name}. Skipping.")
+                        continue
+                    model = model_adapter
+                    print(f"✅ Initialized {model_name}")
+                
+                models.append(model)
+                model_names.append(model_name)
+            except Exception as e:
+                print(f"❌ Error initializing model {model_name}: {e}")
     
     if not models:
         print("❌ No models were initialized. Exiting.")
