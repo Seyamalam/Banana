@@ -15,7 +15,7 @@ from cell2_dataset import load_data
 from cell3_model import BananaLeafCNN
 from cell4_training import train, validate
 from cell6_utils import save_checkpoint, load_checkpoint, evaluate_model
-from cell11_training_resources import measure_training_resources, compare_training_resources
+from cell11_training_resources import measure_training_resources, compare_training_resources, estimate_energy_consumption, calculate_carbon_footprint
 from cell12_statistical_testing import statistical_significance_test, mcnemar_test
 from cell13_efficiency_metrics import calculate_advanced_efficiency_metrics, calculate_pareto_frontier, calculate_model_size
 from cell14_ablation_studies import AblationStudy, create_model_variant, change_dropout_rate, change_activation, remove_layer, change_normalization
@@ -865,6 +865,9 @@ def save_comprehensive_comparison(models, model_names, evaluation_results, deplo
     # Use ModelInfo to get structured information about each model
     from cell8_model_zoo import ModelInfo, get_model_info_from_model
     
+    # Import energy estimation functions
+    from cell11_training_resources import estimate_energy_consumption, calculate_carbon_footprint
+    
     # List to store detailed model information
     model_info_list = []
     
@@ -957,6 +960,33 @@ def save_comprehensive_comparison(models, model_names, evaluation_results, deplo
             except (IndexError, KeyError) as e:
                 print(f"Warning: Could not add deployment metrics for {model_name}: {e}")
         
+        # Add energy and carbon footprint estimates if we have training time data
+        training_time_seconds = 0
+        gpu_used = torch.cuda.is_available()
+        
+        # Check for training metrics directory
+        training_metrics_path = os.path.join(args.output_dir, model_name, 'training', f"{model_name}_resource_metrics.csv")
+        if os.path.exists(training_metrics_path):
+            try:
+                # Load training metrics
+                metrics_df = pd.read_csv(training_metrics_path)
+                
+                # Extract training time
+                time_row = metrics_df[metrics_df['Metric'] == 'training_time_seconds']
+                if not time_row.empty:
+                    training_time_seconds = float(time_row['Value'].iloc[0])
+                    
+                    # Calculate energy and carbon footprint
+                    energy_wh = estimate_energy_consumption(training_time_seconds, gpu_used)
+                    carbon_g = calculate_carbon_footprint(energy_wh)
+                    
+                    # Add to model data
+                    model_data['Training Time (s)'] = training_time_seconds
+                    model_data['Energy Consumption (Wh)'] = energy_wh
+                    model_data['Carbon Footprint (g CO2)'] = carbon_g
+            except Exception as e:
+                print(f"Warning: Could not estimate energy consumption for {model_name}: {e}")
+        
         comparison_data.append(model_data)
     
     # Create comparison dataframe
@@ -966,6 +996,64 @@ def save_comprehensive_comparison(models, model_names, evaluation_results, deplo
     comprehensive_csv = os.path.join(comparison_dir, "comprehensive_model_comparison.csv")
     comparison_df.to_csv(comprehensive_csv, index=False)
     print(f"Comprehensive model comparison saved to {comprehensive_csv}")
+    
+    # Generate energy comparison visualizations if we have energy data
+    if 'Energy Consumption (Wh)' in comparison_df.columns:
+        try:
+            print("Generating energy and carbon footprint visualizations...")
+            
+            # Create energy bar chart
+            plt.figure(figsize=(12, 6))
+            plt.bar(comparison_df['Model'], comparison_df['Energy Consumption (Wh)'])
+            plt.xlabel('Model')
+            plt.ylabel('Energy Consumption (Wh)')
+            plt.title('Estimated Energy Consumption During Training')
+            plt.xticks(rotation=45, ha='right')
+            plt.grid(axis='y', alpha=0.3)
+            plt.tight_layout()
+            energy_path = os.path.join(comparison_dir, "energy_consumption_comparison")
+            save_figure(plt, energy_path, formats=['png', 'svg'])
+            
+            # Create carbon footprint bar chart
+            plt.figure(figsize=(12, 6))
+            plt.bar(comparison_df['Model'], comparison_df['Carbon Footprint (g CO2)'])
+            plt.xlabel('Model')
+            plt.ylabel('Carbon Footprint (g CO2)')
+            plt.title('Estimated Carbon Footprint During Training')
+            plt.xticks(rotation=45, ha='right')
+            plt.grid(axis='y', alpha=0.3)
+            plt.tight_layout()
+            carbon_path = os.path.join(comparison_dir, "carbon_footprint_comparison")
+            save_figure(plt, carbon_path, formats=['png', 'svg'])
+            
+            # Create scatter plot of energy vs. accuracy
+            if 'Accuracy' in comparison_df.columns:
+                try:
+                    plt.figure(figsize=(10, 6))
+                    plt.scatter(comparison_df['Energy Consumption (Wh)'], comparison_df['Accuracy'] * 100, s=100, alpha=0.7)
+                    
+                    # Add model names as annotations
+                    for i, model_name in enumerate(comparison_df['Model']):
+                        plt.annotate(
+                            model_name,
+                            (comparison_df['Energy Consumption (Wh)'].iloc[i], comparison_df['Accuracy'].iloc[i] * 100),
+                            xytext=(5, 5),
+                            textcoords='offset points'
+                        )
+                    
+                    plt.xlabel('Energy Consumption (Wh)')
+                    plt.ylabel('Accuracy (%)')
+                    plt.title('Trade-off: Accuracy vs. Energy Consumption')
+                    plt.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    tradeoff_path = os.path.join(comparison_dir, "accuracy_vs_energy")
+                    save_figure(plt, tradeoff_path, formats=['png', 'svg'])
+                except Exception as e:
+                    print(f"Warning: Could not generate accuracy vs. energy visualization: {e}")
+                
+            print(f"Energy and carbon footprint visualizations saved to {comparison_dir}")
+        except Exception as e:
+            print(f"Warning: Could not generate energy visualizations: {e}")
     
     # Save detailed model info as JSON
     model_info_data = [model_info.to_dict() for model_info in model_info_list]
@@ -1013,7 +1101,7 @@ def save_comprehensive_comparison(models, model_names, evaluation_results, deplo
                 # Normalize values between 0 and 1 for each metric
                 norm_df = comparison_df.copy()
                 for col in numeric_cols:
-                    if 'inference' in col.lower() or 'size' in col.lower() or 'parameters' in col.lower():
+                    if 'inference' in col.lower() or 'size' in col.lower() or 'parameters' in col.lower() or 'energy' in col.lower() or 'carbon' in col.lower() or 'time' in col.lower():
                         # For these metrics, lower is better, so invert the normalization
                         max_val = norm_df[col].max()
                         min_val = norm_df[col].min()
@@ -1032,6 +1120,10 @@ def save_comprehensive_comparison(models, model_names, evaluation_results, deplo
                 
                 # Select a subset of metrics for clearer visualization
                 radar_metrics = ['Accuracy', 'F1 Score', 'Size (MB)', 'Parameters', 'Inference Time (ms)']
+                # Add energy metrics if available
+                if 'Energy Consumption (Wh)' in comparison_df.columns:
+                    radar_metrics.append('Energy Consumption (Wh)')
+                
                 radar_metrics = [m for m in radar_metrics if m in norm_df.columns]
                 
                 # Number of variables
