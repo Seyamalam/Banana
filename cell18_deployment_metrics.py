@@ -56,20 +56,25 @@ def measure_inference_latency(
     
     # Calculate statistics
     latencies_ms = np.array(latencies) * 1000  # Convert to milliseconds
-    avg_latency = np.mean(latencies_ms)
+    mean_latency = np.mean(latencies_ms)
     std_latency = np.std(latencies_ms)
     min_latency = np.min(latencies_ms)
     max_latency = np.max(latencies_ms)
     p95_latency = np.percentile(latencies_ms, 95)
     p99_latency = np.percentile(latencies_ms, 99)
     
+    # Calculate throughput (samples/second)
+    batch_size = input_size[0]
+    throughput = batch_size * 1000 / mean_latency if mean_latency > 0 else 0
+    
     return {
-        'avg_latency_ms': avg_latency,
+        'mean_latency': mean_latency,
         'std_latency_ms': std_latency,
         'min_latency_ms': min_latency,
         'max_latency_ms': max_latency,
         'p95_latency_ms': p95_latency,
-        'p99_latency_ms': p99_latency
+        'p99_latency_ms': p99_latency,
+        'throughput': throughput
     }
 
 
@@ -229,20 +234,19 @@ def benchmark_deployment_metrics(
     os.makedirs(deployment_dir, exist_ok=True)
     
     try:
-        # Make a copy of the model to avoid modifying the original
-        model_copy = type(model)()
-        model_copy.load_state_dict(model.state_dict())
+        # For benchmarking we'll use the original model, not a copy
+        # This avoids issues with copying custom model types
         
         # Measure model size
-        model_size = calculate_model_size(model_copy)
+        model_size = calculate_model_size(model)
         
         # Count parameters
-        params = count_parameters(model_copy)
+        params = count_parameters(model)
         
         # Export to different formats - ensure model is on CPU for export
-        model_copy = model_copy.cpu()
-        onnx_metrics = export_to_onnx(model_copy, model_name, input_size, deployment_dir)
-        torchscript_metrics = export_to_torchscript(model_copy, model_name, input_size, deployment_dir)
+        model = model.cpu()
+        onnx_metrics = export_to_onnx(model, model_name, input_size, deployment_dir)
+        torchscript_metrics = export_to_torchscript(model, model_name, input_size, deployment_dir)
         
         # Measure latency for different batch sizes
         latency_results = []
@@ -254,7 +258,7 @@ def benchmark_deployment_metrics(
             # Measure latency - try both CPU and CUDA if available
             try:
                 # First try with CPU
-                latency_metrics = measure_inference_latency(model_copy, current_input_size, device='cpu')
+                latency_metrics = measure_inference_latency(model, current_input_size, device='cpu')
                 
                 latency_results.append({
                     'batch_size': batch_size,
@@ -264,7 +268,7 @@ def benchmark_deployment_metrics(
                 
                 # Try with CUDA if available
                 if torch.cuda.is_available():
-                    cuda_latency_metrics = measure_inference_latency(model_copy, current_input_size, device='cuda')
+                    cuda_latency_metrics = measure_inference_latency(model, current_input_size, device='cuda')
                     
                     latency_results.append({
                         'batch_size': batch_size,
@@ -378,14 +382,14 @@ def compare_deployment_metrics(
         latency_metrics = measure_inference_latency(model, input_size)
         
         # Calculate throughput (images/second)
-        throughput = input_size[0] * 1000 / latency_metrics['avg_latency_ms']
+        throughput = input_size[0] * 1000 / latency_metrics['mean_latency']
         
         # Store results
         all_results.append({
             'model_name': model_name,
             'parameters': params,
             'model_size_mb': model_size,
-            'avg_latency_ms': latency_metrics['avg_latency_ms'],
+            'mean_latency': latency_metrics['mean_latency'],
             'p95_latency_ms': latency_metrics['p95_latency_ms'],
             'throughput_imgs_per_sec': throughput
         })
@@ -401,7 +405,7 @@ def compare_deployment_metrics(
     
     # 1. Latency Comparison
     plt.figure(figsize=(12, 6))
-    plt.bar(df['model_name'], df['avg_latency_ms'])
+    plt.bar(df['model_name'], df['mean_latency'])
     plt.xlabel('Model')
     plt.ylabel('Average Latency (ms)')
     plt.title('Inference Latency Comparison')
@@ -409,7 +413,7 @@ def compare_deployment_metrics(
     plt.grid(True, linestyle='--', alpha=0.7)
     
     # Add values on top of bars
-    for i, v in enumerate(df['avg_latency_ms']):
+    for i, v in enumerate(df['mean_latency']):
         plt.text(i, v + 0.1, f'{v:.2f}', ha='center')
     
     plt.tight_layout()
@@ -441,13 +445,13 @@ def compare_deployment_metrics(
     plt.figure(figsize=(10, 8))
     
     # Create scatter plot
-    plt.scatter(df['model_size_mb'], df['avg_latency_ms'], s=100, alpha=0.7)
+    plt.scatter(df['model_size_mb'], df['mean_latency'], s=100, alpha=0.7)
     
     # Add model names as annotations
     for i, row in df.iterrows():
         plt.annotate(
             row['model_name'], 
-            (row['model_size_mb'], row['avg_latency_ms']),
+            (row['model_size_mb'], row['mean_latency']),
             xytext=(5, 5),
             textcoords='offset points'
         )
