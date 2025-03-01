@@ -65,10 +65,18 @@ The project provides a main script `run_analysis.py` that can run different anal
 
 ### Training Models
 
+
+
 To train the custom model:
 ```bash
 python run_analysis.py --train --models banana_leaf_cnn
 ```
+
+
+'''bash
+python run_analysis.py --all --load_all_models --train --evaluate --ablation --robustness --deployment --batch_size 32 --epochs 2 --lr 0.001 --data_dir dataset --output_dir models --seed 42
+'''
+
 
 To train multiple models for comparison:
 ```bash

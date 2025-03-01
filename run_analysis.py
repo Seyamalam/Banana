@@ -2200,6 +2200,12 @@ def main():
             # Create overall robustness summary
             try:
                 print("\n📊 Generating overall robustness summary...")
+                
+                # Check if robustness_results is empty
+                if not robustness_results:
+                    print("⚠️ Warning: No robustness results available for visualization")
+                    return
+                
                 # Generate side-by-side comparisons of all models under all perturbations
                 visualize_side_by_side_robustness(robustness_results, robustness_comparison_dir)
                 
@@ -2224,6 +2230,7 @@ def main():
                             
                             # Skip if metrics are not numeric
                             if not isinstance(baseline_acc, (int, float)) or not isinstance(pert_acc, (int, float)):
+                                print(f"⚠️ Warning: Non-numeric accuracy values for {model_name}, {pert_type}")
                                 continue
                             
                             acc_drop = baseline_acc - pert_acc
@@ -2235,33 +2242,59 @@ def main():
                             })
                 
                 # Create summary dataframe if we have data
-                if summary_data:
-                    summary_df = pd.DataFrame(summary_data)
-                    
-                    # Save to CSV
-                    summary_csv = os.path.join(robustness_comparison_dir, "robustness_summary.csv")
-                    summary_df.to_csv(summary_csv, index=False)
-                    
-                    # Check if we have enough data for a heatmap
-                    if len(summary_df) > 0 and len(summary_df['Model'].unique()) > 0 and len(summary_df['Perturbation'].unique()) > 0:
-                        # Create heatmap for accuracy drop
-                        plt.figure(figsize=(12, 8))
-                        pivot_df = summary_df.pivot(index='Perturbation', columns='Model', values='Accuracy Drop')
-                        sns.heatmap(pivot_df, annot=True, cmap='coolwarm_r', fmt='.3f')
-                        plt.title('Accuracy Drop Under Different Perturbations')
-                        plt.tight_layout()
-                        
-                        # Save heatmap
-                        heatmap_path = os.path.join(robustness_comparison_dir, "robustness_heatmap")
-                        save_figure(plt, heatmap_path, formats=['png', 'svg'])
-                        
-                        print(f"✅ Robustness summary saved to {summary_csv}")
-                    else:
-                        print("⚠️ Warning: Not enough data to create robustness heatmap")
-                else:
+                if not summary_data:
                     print("⚠️ Warning: No valid robustness data available for visualization")
+                    return
+                    
+                summary_df = pd.DataFrame(summary_data)
+                
+                # Save to CSV
+                summary_csv = os.path.join(robustness_comparison_dir, "robustness_summary.csv")
+                summary_df.to_csv(summary_csv, index=False)
+                
+                # Verify we have enough unique models and perturbations for a meaningful heatmap
+                unique_models = summary_df['Model'].unique()
+                unique_perturbations = summary_df['Perturbation'].unique()
+                
+                if len(unique_models) < 1 or len(unique_perturbations) < 1:
+                    print("⚠️ Warning: Not enough unique models or perturbations for heatmap")
+                    return
+                
+                # Create pivot table with explicit handling for missing values
+                try:
+                    # Create heatmap for accuracy drop
+                    plt.figure(figsize=(12, 8))
+                    
+                    # Ensure pivot works even with missing data
+                    pivot_df = summary_df.pivot_table(
+                        index='Perturbation', 
+                        columns='Model', 
+                        values='Accuracy Drop',
+                        aggfunc='mean',  # Use mean in case of duplicates
+                        fill_value=0     # Fill missing with zeros
+                    )
+                    
+                    # Check if pivot is empty
+                    if pivot_df.empty or pivot_df.isnull().all().all():
+                        print("⚠️ Warning: Empty pivot table for heatmap")
+                        return
+                    
+                    sns.heatmap(pivot_df, annot=True, cmap='coolwarm_r', fmt='.3f')
+                    plt.title('Accuracy Drop Under Different Perturbations')
+                    plt.tight_layout()
+                    
+                    # Save heatmap
+                    heatmap_path = os.path.join(robustness_comparison_dir, "robustness_heatmap")
+                    save_figure(plt, heatmap_path, formats=['png', 'svg'])
+                    
+                    print(f"✅ Robustness summary saved to {summary_csv}")
+                except Exception as e:
+                    print(f"⚠️ Warning: Failed to create robustness heatmap: {e}")
+                
             except Exception as e:
                 print(f"⚠️ Warning: Could not generate robustness summary: {e}")
+                import traceback
+                traceback.print_exc()  # Print full traceback for debugging
     
     # Run deployment metrics
     deployment_results = []
@@ -2357,10 +2390,21 @@ def main():
             # Calculate per-class metrics for each model
             per_class_data = {}
             
-            for result in evaluation_results:
+            # Check if we have any evaluation results with predictions
+            valid_results = [r for r in evaluation_results if r.get('y_true') and r.get('y_pred')]
+            if not valid_results:
+                print("⚠️ Warning: No valid evaluation results with predictions found for per-class comparison")
+                return
+            
+            for result in valid_results:
                 model_name = result['name']
                 y_true = result['y_true']
                 y_pred = result['y_pred']
+                
+                # Skip if y_true or y_pred are empty
+                if not y_true or not y_pred:
+                    print(f"⚠️ Warning: Empty prediction data for {model_name}, skipping in per-class comparison")
+                    continue
                 
                 # Calculate per-class accuracy
                 per_class_acc = []
@@ -2378,6 +2422,11 @@ def main():
                     per_class_acc.append(class_acc)
                 
                 per_class_data[model_name] = per_class_acc
+            
+            # Check if we have any data to plot
+            if not per_class_data:
+                print("⚠️ Warning: No valid per-class data available for visualization")
+                return
             
             # Convert to DataFrame
             per_class_df = pd.DataFrame(per_class_data, index=class_names)
@@ -2399,8 +2448,15 @@ def main():
             # Create bar chart for each class
             for class_idx, class_name in enumerate(class_names):
                 plt.figure(figsize=(10, 6))
-                class_accuracies = [per_class_data[model_name][class_idx] for model_name in model_names_list]
-                plt.bar(model_names_list, class_accuracies)
+                # Check if all required model names are in per_class_data before creating chart
+                available_models = [m for m in model_names_list if m in per_class_data]
+                if not available_models:
+                    print(f"⚠️ Warning: No models available for class {class_name}, skipping chart")
+                    plt.close()
+                    continue
+                
+                class_accuracies = [per_class_data[model_name][class_idx] for model_name in available_models]
+                plt.bar(available_models, class_accuracies)
                 plt.xlabel('Model')
                 plt.ylabel('Accuracy')
                 plt.title(f'Accuracy for Class: {class_name}')
@@ -2415,6 +2471,8 @@ def main():
             print(f"✅ Per-class comparison saved to {per_class_csv}")
         except Exception as e:
             print(f"⚠️ Warning: Could not generate per-class comparison: {e}")
+            import traceback
+            traceback.print_exc()  # Print full traceback for debugging
     
     print("\n" + "="*80)
     print("✅ ANALYSIS COMPLETE!")
