@@ -114,7 +114,8 @@ def calculate_layer_flops(
         
         # Check if macs_dict is a dictionary
         if not isinstance(macs_dict, dict):
-            print(f"Warning: Expected dictionary for MACs but got {type(macs_dict).__name__}")
+            # Instead of showing a warning, provide a more informative message
+            print(f"📊 Creating layer summary with total FLOPs for {model.__class__.__name__} - detailed layer breakdown not available")
             # Create a single entry for total MACs
             macs_dict = {"total": macs_dict}
             params_dict = {"total": params_dict}
@@ -289,6 +290,10 @@ def analyze_layer_distribution(
         if df is None or len(df) == 0:
             print(f"No layer-wise FLOPs data available for {model_name}")
             return pd.DataFrame(), "", ""
+        
+        # Check if we only have a single "total" entry
+        if len(df) == 1 and df['layer_name'].iloc[0] == 'total':
+            print(f"  ℹ️ Using simplified representation for {model_name} - detailed layer breakdown not available")
             
         # Save to CSV
         os.makedirs(output_dir, exist_ok=True)
@@ -305,7 +310,13 @@ def analyze_layer_distribution(
         plt.bar(top_layers['layer_name'], top_layers['flops_percentage'])
         plt.xlabel('Layer')
         plt.ylabel('FLOPs (%)')
-        plt.title(f'Top {top_n} Layers by Computational Cost')
+        
+        # Use appropriate title based on whether we have detailed layers or just total
+        if len(df) == 1 and df['layer_name'].iloc[0] == 'total':
+            plt.title(f'Total Computational Cost - {model_name}')
+        else:
+            plt.title(f'Top {top_n} Layers by Computational Cost - {model_name}')
+            
         plt.xticks(rotation=45, ha='right')
         plt.grid(True, linestyle='--', alpha=0.7)
         
