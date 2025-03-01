@@ -68,147 +68,66 @@ def calculate_model_size(model):
     size_all_mb = (param_size + buffer_size) / 1024**2
     return size_all_mb
 
-def evaluate_model(model, test_loader, criterion, device, save_dir=None):
+def evaluate_model(model, test_loader, device):
     """
-    Evaluate model on test set and return detailed metrics
+    Evaluate a model on a test dataset and compute metrics.
     
     Args:
-        model: trained model
-        test_loader: test data loader
-        criterion: loss function
-        device: device to run the model on
-        save_dir: directory to save metrics (optional)
+        model: PyTorch model
+        test_loader: DataLoader for test data
+        device: Device to run evaluation on
+        
+    Returns:
+        Dictionary with evaluation metrics, true labels, and predicted labels
     """
     model.eval()
-    test_loss = 0.0
-    correct = 0
-    total = 0
-    
-    all_preds = []
-    all_targets = []
-    all_probs = []
-    
-    start_time = time.time()
+    predictions = []
+    true_labels = []
     
     with torch.no_grad():
-        for inputs, targets in test_loader:
-            inputs, targets = inputs.to(device), targets.to(device)
-            
-            # Forward pass
+        for inputs, labels in test_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
             outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            probs = torch.nn.functional.softmax(outputs, dim=1)
+            _, preds = torch.max(outputs, 1)
             
-            # Statistics
-            test_loss += loss.item() * inputs.size(0)
-            _, predicted = outputs.max(1)
-            total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
-            
-            # Store predictions and targets for metrics
-            all_preds.extend(predicted.cpu().numpy())
-            all_targets.extend(targets.cpu().numpy())
-            all_probs.extend(probs.cpu().numpy())
+            predictions.extend(preds.cpu().numpy())
+            true_labels.extend(labels.cpu().numpy())
     
     # Calculate metrics
-    inference_time = time.time() - start_time
-    avg_inference_time = inference_time / total
+    from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
     
-    test_loss = test_loss / total
-    test_acc = 100. * correct / total
+    # Compute confusion matrix
+    cm = confusion_matrix(true_labels, predictions)
     
-    # Calculate metrics
-    accuracy = accuracy_score(all_targets, all_preds)
+    # Ensure confusion matrix is a numpy array
+    if isinstance(cm, list):
+        cm = np.array(cm)
+    
+    # Calculate normalized confusion matrix
+    if isinstance(cm, np.ndarray) and cm.size > 0:
+        with np.errstate(divide='ignore', invalid='ignore'):
+            row_sums = cm.sum(axis=1)
+            cm_norm = np.zeros_like(cm, dtype=float)
+            for i, row_sum in enumerate(row_sums):
+                if row_sum > 0:
+                    cm_norm[i] = cm[i] / row_sum
+    else:
+        cm_norm = np.array([[0]])
+    
+    # Calculate evaluation metrics
+    accuracy = accuracy_score(true_labels, predictions)
     precision, recall, f1, _ = precision_recall_fscore_support(
-        all_targets, all_preds, average='weighted', zero_division=0
+        true_labels, predictions, average='weighted', zero_division=0
     )
     
-    # Calculate confusion matrix
-    cm = confusion_matrix(all_targets, all_preds)
-    
-    # Create metrics dictionary
-    metrics = {
-        'test_loss': test_loss,
-        'test_acc': test_acc,
-        'total_samples': total,
-        'correct_samples': correct,
-        'inference_time': inference_time,
-        'avg_inference_time': avg_inference_time,
+    return {
+        'accuracy': accuracy,
+        'precision': precision,
+        'recall': recall,
+        'f1': f1,
         'confusion_matrix': cm,
-        'all_preds': all_preds,
-        'all_targets': all_targets,
-        'all_probs': all_probs
-    }
-    
-    # Save metrics if save_dir is provided
-    if save_dir:
-        os.makedirs(save_dir, exist_ok=True)
-        
-        # Save basic metrics as CSV
-        metrics_path = os.path.join(save_dir, 'evaluation_metrics.csv')
-        with open(metrics_path, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(['metric', 'value'])
-            writer.writerow(['test_loss', test_loss])
-            writer.writerow(['test_accuracy', test_acc])
-            writer.writerow(['total_samples', total])
-            writer.writerow(['correct_samples', correct])
-            writer.writerow(['inference_time_seconds', inference_time])
-            writer.writerow(['avg_inference_time_ms', avg_inference_time * 1000])
-        print(f"Basic metrics saved to {metrics_path}")
-        
-        # Save per-sample predictions
-        preds_path = os.path.join(save_dir, 'sample_predictions.csv')
-        with open(preds_path, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(['sample_id', 'true_label', 'predicted_label', 'correct'])
-            for i in range(len(all_targets)):
-                writer.writerow([
-                    i,
-                    IDX_TO_CLASS[all_targets[i]],
-                    IDX_TO_CLASS[all_preds[i]],
-                    all_preds[i] == all_targets[i]
-                ])
-        print(f"Sample predictions saved to {preds_path}")
-        
-        # Save confusion matrix
-        cm_path = os.path.join(save_dir, 'confusion_matrix.csv')
-        class_names = [IDX_TO_CLASS[i] for i in range(NUM_CLASSES)]
-        cm_df = pd.DataFrame(cm, index=class_names, columns=class_names)
-        cm_df.to_csv(cm_path)
-        print(f"Confusion matrix saved to {cm_path}")
-        
-        # Save class-wise metrics
-        class_metrics_path = os.path.join(save_dir, 'class_metrics.csv')
-        class_metrics = []
-        for i in range(NUM_CLASSES):
-            # Calculate metrics for this class
-            class_indices = [j for j, label in enumerate(all_targets) if label == i]
-            class_correct = sum(1 for j in class_indices if all_preds[j] == all_targets[j])
-            class_total = len(class_indices)
-            class_acc = 100. * class_correct / class_total if class_total > 0 else 0
-            
-            class_metrics.append({
-                'class': IDX_TO_CLASS[i],
-                'accuracy': class_acc,
-                'correct': class_correct,
-                'total': class_total
-            })
-        
-        # Save as CSV
-        with open(class_metrics_path, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(['class', 'accuracy', 'correct_samples', 'total_samples'])
-            for metric in class_metrics:
-                writer.writerow([
-                    metric['class'],
-                    metric['accuracy'],
-                    metric['correct'],
-                    metric['total']
-                ])
-        print(f"Class-wise metrics saved to {class_metrics_path}")
-    
-    return metrics
+        'confusion_matrix_norm': cm_norm
+    }, true_labels, predictions
 
 def plot_confusion_matrix(cm, save_path=None):
     """
@@ -490,56 +409,6 @@ def load_checkpoint(model: torch.nn.Module,
     val_acc = checkpoint['val_acc']
     
     return model, optimizer, epoch, val_acc
-
-def evaluate_model(model: torch.nn.Module, 
-                  test_loader: torch.utils.data.DataLoader, 
-                  device: torch.device) -> Tuple[Dict[str, float], List[int], List[int]]:
-    """
-    Evaluate model on test data.
-    
-    Args:
-        model: PyTorch model
-        test_loader: Test data loader
-        device: Device to run evaluation on
-        
-    Returns:
-        Tuple of (metrics_dict, true_labels, predicted_labels)
-    """
-    model.eval()
-    all_preds = []
-    all_targets = []
-    
-    with torch.no_grad():
-        for inputs, targets in test_loader:
-            inputs, targets = inputs.to(device), targets.to(device)
-            
-            # Forward pass
-            outputs = model(inputs)
-            _, preds = torch.max(outputs, 1)
-            
-            # Store predictions and targets
-            all_preds.extend(preds.cpu().numpy())
-            all_targets.extend(targets.cpu().numpy())
-    
-    # Calculate metrics
-    accuracy = accuracy_score(all_targets, all_preds)
-    precision, recall, f1, _ = precision_recall_fscore_support(
-        all_targets, all_preds, average='weighted', zero_division=0
-    )
-    
-    # Calculate confusion matrix
-    cm = confusion_matrix(all_targets, all_preds)
-    
-    # Create metrics dictionary
-    metrics = {
-        'accuracy': accuracy,
-        'precision': precision,
-        'recall': recall,
-        'f1': f1,
-        'confusion_matrix': cm
-    }
-    
-    return metrics, all_targets, all_preds
 
 def get_model_summary(model: torch.nn.Module) -> str:
     """

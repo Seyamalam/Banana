@@ -208,8 +208,22 @@ def compare_confusion_matrices(results, output_dir):
         model_name = result['name']
         cm = result['confusion_matrix']
         
-        # Normalize confusion matrix
-        cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        # Ensure confusion matrix is a numpy array
+        if isinstance(cm, list):
+            cm = np.array(cm)
+        
+        # Skip invalid confusion matrices
+        if not isinstance(cm, np.ndarray) or cm.size == 0:
+            print(f"Warning: Invalid confusion matrix for {model_name}, skipping")
+            continue
+        
+        # Normalize confusion matrix with error handling
+        with np.errstate(divide='ignore', invalid='ignore'):
+            row_sums = cm.sum(axis=1)
+            cm_norm = np.zeros_like(cm, dtype=float)
+            for j, row_sum in enumerate(row_sums):
+                if row_sum > 0:
+                    cm_norm[j] = cm[j] / row_sum
         
         # Add subplot
         ax = fig.add_subplot(nrows, ncols, i + 1)
@@ -586,13 +600,25 @@ def run_robustness_tests(model, model_name, test_loader, args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     try:
+        # Define perturbation types to test
+        perturbations_to_test = [
+            'gaussian_noise',
+            'blur',
+            'brightness',
+            'contrast',
+            'rotation',
+            'occlusion',
+            'jpeg_compression'
+        ]
+        
         # Create robustness test
         robustness_test = RobustnessTest(
             model=model,
             model_name=model_name,
             test_loader=test_loader,
             device=device,
-            output_dir=os.path.join(args.output_dir, 'robustness')
+            output_dir=os.path.join(args.output_dir, 'robustness'),
+            perturbations_to_test=perturbations_to_test
         )
         
         # Run tests
@@ -602,6 +628,8 @@ def run_robustness_tests(model, model_name, test_loader, args):
         return results
     except Exception as e:
         print(f"❌ Error running robustness tests for {model_name}: {e}")
+        import traceback
+        traceback.print_exc()
         return {'baseline': {'accuracy': 0}, 'error': str(e)}
 
 
@@ -893,11 +921,30 @@ def save_comprehensive_comparison(models, model_names, evaluation_results, deplo
                 # Calculate per-class accuracies from confusion matrix
                 # Diagonal elements are correct predictions for each class
                 class_accuracies = {}
-                cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-                for class_idx, class_name in enumerate(class_names):
-                    if class_idx < len(cm_norm) and cm_norm[class_idx].sum() > 0:
-                        class_accuracies[class_name] = cm_norm[class_idx, class_idx]
-                    else:
+                
+                # Ensure confusion matrix is a numpy array
+                if isinstance(cm, list):
+                    cm = np.array(cm)
+                
+                # Check if confusion matrix is valid
+                if isinstance(cm, np.ndarray) and cm.size > 0:
+                    # Normalize the confusion matrix
+                    with np.errstate(divide='ignore', invalid='ignore'):  # Handle division by zero
+                        row_sums = cm.sum(axis=1)
+                        cm_norm = np.zeros_like(cm, dtype=float)
+                        for i, row_sum in enumerate(row_sums):
+                            if row_sum > 0:
+                                cm_norm[i] = cm[i] / row_sum
+                    
+                    # Get per-class accuracies (diagonal elements are correct predictions)
+                    for class_idx, class_name in enumerate(class_names):
+                        if class_idx < len(cm_norm) and cm_norm[class_idx].sum() > 0:
+                            class_accuracies[class_name] = cm_norm[class_idx, class_idx]
+                        else:
+                            class_accuracies[class_name] = 0.0
+                else:
+                    # If confusion matrix is invalid, use zero accuracies
+                    for class_name in class_names:
                         class_accuracies[class_name] = 0.0
                 
                 model_info.class_accuracies = class_accuracies
@@ -1187,11 +1234,21 @@ def visualize_side_by_side_robustness(robustness_results, output_dir):
     
     for result in robustness_results:
         model_name = result['name']
+        
+        # Check if results exist and are a dictionary
+        if 'results' not in result or not isinstance(result['results'], dict):
+            print(f"Warning: No valid results for {model_name}")
+            continue
+            
         results_dict = result['results']
         
         # Get baseline accuracy
         if 'baseline' in results_dict:
-            baseline_accuracies[model_name] = results_dict['baseline'].get('accuracy', 0)
+            if isinstance(results_dict['baseline'], dict):
+                baseline_accuracies[model_name] = results_dict['baseline'].get('accuracy', 0)
+            else:
+                print(f"Warning: Baseline results for {model_name} are not a dictionary")
+                baseline_accuracies[model_name] = 0
         else:
             baseline_accuracies[model_name] = 0
         
@@ -1204,14 +1261,28 @@ def visualize_side_by_side_robustness(robustness_results, output_dir):
                 if pert_type not in accuracy_under_perturbation:
                     accuracy_under_perturbation[pert_type] = {}
                 
-                accuracy_under_perturbation[pert_type][model_name] = pert_result.get('accuracy', 0)
+                # Check if pert_result is a dictionary with an accuracy key
+                if isinstance(pert_result, dict) and 'accuracy' in pert_result:
+                    accuracy_under_perturbation[pert_type][model_name] = pert_result['accuracy']
+                else:
+                    print(f"Warning: No valid accuracy data for {model_name} under {pert_type}")
+                    accuracy_under_perturbation[pert_type][model_name] = 0
+    
+    # Check if we have any valid data
+    if not perturbation_types or not baseline_accuracies:
+        print("Warning: No valid robustness data for visualization")
+        # Create an empty comparison file
+        empty_df = pd.DataFrame({'model': model_names})
+        empty_csv = os.path.join(output_dir, "empty_robustness_comparison.csv")
+        empty_df.to_csv(empty_csv, index=False)
+        return empty_csv
     
     # Create a DataFrame for each perturbation type
     comparison_data = []
     
     for pert_type in perturbation_types:
         for model_name in model_names:
-            if model_name in accuracy_under_perturbation.get(pert_type, {}):
+            if model_name in accuracy_under_perturbation.get(pert_type, {}) and model_name in baseline_accuracies:
                 pert_acc = accuracy_under_perturbation[pert_type][model_name]
                 baseline_acc = baseline_accuracies.get(model_name, 0)
                 acc_drop = baseline_acc - pert_acc
@@ -1224,6 +1295,15 @@ def visualize_side_by_side_robustness(robustness_results, output_dir):
                     'Accuracy Drop': acc_drop,
                     'Relative Drop (%)': (acc_drop / baseline_acc * 100) if baseline_acc > 0 else 0
                 })
+    
+    # Check if we have any comparison data
+    if not comparison_data:
+        print("Warning: No valid comparison data for visualization")
+        # Create an empty comparison file
+        empty_df = pd.DataFrame({'model': model_names})
+        empty_csv = os.path.join(output_dir, "empty_robustness_comparison.csv")
+        empty_df.to_csv(empty_csv, index=False)
+        return empty_csv
     
     # Create DataFrame
     comparison_df = pd.DataFrame(comparison_data)
@@ -1259,6 +1339,9 @@ def visualize_side_by_side_robustness(robustness_results, output_dir):
     for pert_type in perturbation_types:
         pert_data = comparison_df[comparison_df['Perturbation'] == pert_type.replace('_', ' ').title()]
         
+        if pert_data.empty:
+            continue
+            
         plt.figure(figsize=(12, 6))
         
         # Set up bar positions
@@ -2221,8 +2304,13 @@ def main():
                         print(f"⚠️ Warning: Invalid robustness results format for {model_name}")
                         continue
                     
-                    # Calculate average accuracy drop across all perturbations
+                    # Calculate accuracy drop across all perturbations
                     baseline_acc = model_results.get('baseline', {}).get('accuracy', 0)
+                    
+                    # Skip if baseline accuracy is not numeric
+                    if not isinstance(baseline_acc, (int, float)):
+                        print(f"⚠️ Warning: Non-numeric baseline accuracy for {model_name}: {baseline_acc}")
+                        continue
                     
                     for pert_type, pert_result in model_results.items():
                         if pert_type != 'baseline' and isinstance(pert_result, dict):
@@ -2279,6 +2367,11 @@ def main():
                         print("⚠️ Warning: Empty pivot table for heatmap")
                         return
                     
+                    # Check that at least some values are non-zero 
+                    if (pivot_df == 0).all().all():
+                        print("⚠️ Warning: All values in pivot table are zero, not creating heatmap")
+                        return
+                    
                     sns.heatmap(pivot_df, annot=True, cmap='coolwarm_r', fmt='.3f')
                     plt.title('Accuracy Drop Under Different Perturbations')
                     plt.tight_layout()
@@ -2290,6 +2383,8 @@ def main():
                     print(f"✅ Robustness summary saved to {summary_csv}")
                 except Exception as e:
                     print(f"⚠️ Warning: Failed to create robustness heatmap: {e}")
+                    import traceback
+                    traceback.print_exc()
                 
             except Exception as e:
                 print(f"⚠️ Warning: Could not generate robustness summary: {e}")

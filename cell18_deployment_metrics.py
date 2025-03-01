@@ -93,36 +93,53 @@ def export_to_onnx(
     """
     os.makedirs(output_dir, exist_ok=True)
     
-    # Set model to evaluation mode
-    model.eval()
-    
-    # Create dummy input
-    dummy_input = torch.randn(input_size)
-    
-    # Export to ONNX
-    onnx_path = os.path.join(output_dir, f"{model_name}.onnx")
-    
-    torch.onnx.export(
-        model,
-        dummy_input,
-        onnx_path,
-        export_params=True,
-        opset_version=12,
-        do_constant_folding=True,
-        input_names=['input'],
-        output_names=['output'],
-        dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}}
-    )
-    
-    # Get file size
-    onnx_size = os.path.getsize(onnx_path) / (1024 * 1024)  # Convert to MB
-    
-    return {
-        'model_name': model_name,
-        'format': 'onnx',
-        'file_path': onnx_path,
-        'size_mb': onnx_size
-    }
+    try:
+        # First, ensure the model is on CPU
+        model = model.cpu()
+        
+        # Set model to evaluation mode
+        model.eval()
+        
+        # Create dummy input
+        dummy_input = torch.randn(input_size, device='cpu')
+        
+        # Set file path
+        export_path = os.path.join(output_dir, f"{model_name}.onnx")
+        
+        # Start timer
+        start_time = time.time()
+        
+        # Export to ONNX
+        torch.onnx.export(
+            model,
+            dummy_input,
+            export_path,
+            input_names=['input'],
+            output_names=['output'],
+            dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}},
+            verbose=False
+        )
+        
+        # Measure time
+        export_time = time.time() - start_time
+        
+        # Measure size of exported file
+        file_size = os.path.getsize(export_path) / (1024 * 1024)  # Size in MB
+        
+        return {
+            'format': 'onnx',
+            'path': export_path,
+            'size_mb': file_size,
+            'export_time': export_time
+        }
+    except Exception as e:
+        print(f"Error exporting to ONNX: {e}")
+        return {
+            'format': 'onnx',
+            'error': str(e),
+            'size_mb': 0,
+            'export_time': 0
+        }
 
 
 def export_to_torchscript(
@@ -145,26 +162,47 @@ def export_to_torchscript(
     """
     os.makedirs(output_dir, exist_ok=True)
     
-    # Set model to evaluation mode
-    model.eval()
-    
-    # Create dummy input
-    dummy_input = torch.randn(input_size)
-    
-    # Export to TorchScript
-    traced_model = torch.jit.trace(model, dummy_input)
-    script_path = os.path.join(output_dir, f"{model_name}.pt")
-    torch.jit.save(traced_model, script_path)
-    
-    # Get file size
-    script_size = os.path.getsize(script_path) / (1024 * 1024)  # Convert to MB
-    
-    return {
-        'model_name': model_name,
-        'format': 'torchscript',
-        'file_path': script_path,
-        'size_mb': script_size
-    }
+    try:
+        # First, ensure the model is on CPU
+        model = model.cpu()
+        
+        # Set model to evaluation mode
+        model.eval()
+        
+        # Create dummy input
+        dummy_input = torch.randn(input_size, device='cpu')
+        
+        # Set file path
+        export_path = os.path.join(output_dir, f"{model_name}.pt")
+        
+        # Start timer
+        start_time = time.time()
+        
+        # Export to TorchScript
+        with torch.no_grad():
+            traced_script_module = torch.jit.trace(model, dummy_input)
+            traced_script_module.save(export_path)
+        
+        # Measure time
+        export_time = time.time() - start_time
+        
+        # Measure size of exported file
+        file_size = os.path.getsize(export_path) / (1024 * 1024)  # Size in MB
+        
+        return {
+            'format': 'torchscript',
+            'path': export_path,
+            'size_mb': file_size,
+            'export_time': export_time
+        }
+    except Exception as e:
+        print(f"Error exporting to TorchScript: {e}")
+        return {
+            'format': 'torchscript',
+            'error': str(e),
+            'size_mb': 0,
+            'export_time': 0
+        }
 
 
 def benchmark_deployment_metrics(
@@ -187,107 +225,118 @@ def benchmark_deployment_metrics(
     Returns:
         DataFrame with benchmark results, path to CSV file, and path to plot
     """
-    os.makedirs(output_dir, exist_ok=True)
+    deployment_dir = os.path.join(output_dir, 'deployment')
+    os.makedirs(deployment_dir, exist_ok=True)
     
-    # Measure model size
-    model_size = calculate_model_size(model)
-    
-    # Count parameters
-    params = count_parameters(model)
-    
-    # Export to different formats
-    onnx_metrics = export_to_onnx(model, model_name, input_size, output_dir)
-    torchscript_metrics = export_to_torchscript(model, model_name, input_size, output_dir)
-    
-    # Measure latency for different batch sizes
-    latency_results = []
-    
-    for batch_size in batch_sizes:
-        # Adjust input size for current batch size
-        current_input_size = (batch_size,) + input_size[1:]
+    try:
+        # Make a copy of the model to avoid modifying the original
+        model_copy = type(model)()
+        model_copy.load_state_dict(model.state_dict())
         
-        # Measure latency
-        latency_metrics = measure_inference_latency(model, current_input_size)
+        # Measure model size
+        model_size = calculate_model_size(model_copy)
         
-        # Calculate throughput (images/second)
-        throughput = batch_size * 1000 / latency_metrics['avg_latency_ms']
+        # Count parameters
+        params = count_parameters(model_copy)
         
-        latency_results.append({
-            'batch_size': batch_size,
-            'avg_latency_ms': latency_metrics['avg_latency_ms'],
-            'throughput_imgs_per_sec': throughput
-        })
-    
-    # Create DataFrame for latency results
-    latency_df = pd.DataFrame(latency_results)
-    
-    # Save latency results to CSV
-    latency_csv_path = os.path.join(output_dir, f"{model_name}_latency_benchmark.csv")
-    latency_df.to_csv(latency_csv_path, index=False)
-    
-    # Create summary DataFrame
-    summary_data = {
-        'model_name': model_name,
-        'parameters': params,
-        'pytorch_model_size_mb': model_size,
-        'onnx_model_size_mb': onnx_metrics['size_mb'],
-        'torchscript_model_size_mb': torchscript_metrics['size_mb'],
-        'latency_batch1_ms': latency_results[0]['avg_latency_ms'],
-        'max_throughput_imgs_per_sec': max([r['throughput_imgs_per_sec'] for r in latency_results])
-    }
-    
-    summary_df = pd.DataFrame([summary_data])
-    
-    # Save summary to CSV
-    summary_csv_path = os.path.join(output_dir, f"{model_name}_deployment_metrics.csv")
-    summary_df.to_csv(summary_csv_path, index=False)
-    
-    # Create visualizations
-    
-    # 1. Latency vs Batch Size
-    plt.figure(figsize=(10, 6))
-    plt.plot(latency_df['batch_size'], latency_df['avg_latency_ms'], marker='o')
-    plt.xlabel('Batch Size')
-    plt.ylabel('Average Latency (ms)')
-    plt.title(f'Inference Latency vs Batch Size - {model_name}')
-    plt.grid(True, linestyle='--', alpha=0.7)
-    
-    # Save figure
-    base_filename = os.path.join(output_dir, f"{model_name}_latency_vs_batch_size")
-    latency_png, _ = save_figure(plt, base_filename, formats=['png', 'svg'])
-    
-    # 2. Throughput vs Batch Size
-    plt.figure(figsize=(10, 6))
-    plt.plot(latency_df['batch_size'], latency_df['throughput_imgs_per_sec'], marker='o')
-    plt.xlabel('Batch Size')
-    plt.ylabel('Throughput (images/second)')
-    plt.title(f'Inference Throughput vs Batch Size - {model_name}')
-    plt.grid(True, linestyle='--', alpha=0.7)
-    
-    # Save figure
-    base_filename = os.path.join(output_dir, f"{model_name}_throughput_vs_batch_size")
-    throughput_png, _ = save_figure(plt, base_filename, formats=['png', 'svg'])
-    
-    # 3. Model Size Comparison
-    plt.figure(figsize=(10, 6))
-    sizes = [model_size, onnx_metrics['size_mb'], torchscript_metrics['size_mb']]
-    labels = ['PyTorch', 'ONNX', 'TorchScript']
-    
-    plt.bar(labels, sizes)
-    plt.xlabel('Format')
-    plt.ylabel('Model Size (MB)')
-    plt.title(f'Model Size Comparison - {model_name}')
-    plt.grid(True, linestyle='--', alpha=0.7)
-    
-    # Add values on top of bars
-    for i, v in enumerate(sizes):
-        plt.text(i, v + 0.1, f'{v:.2f}', ha='center')
-    
-    # Save figure
-    base_filename = os.path.join(output_dir, f"{model_name}_model_size_comparison")
-    size_png, _ = save_figure(plt, base_filename, formats=['png', 'svg'])
-    
-    return summary_df, summary_csv_path, latency_png
+        # Export to different formats - ensure model is on CPU for export
+        model_copy = model_copy.cpu()
+        onnx_metrics = export_to_onnx(model_copy, model_name, input_size, deployment_dir)
+        torchscript_metrics = export_to_torchscript(model_copy, model_name, input_size, deployment_dir)
+        
+        # Measure latency for different batch sizes
+        latency_results = []
+        
+        for batch_size in batch_sizes:
+            # Adjust input size for current batch size
+            current_input_size = (batch_size,) + input_size[1:]
+            
+            # Measure latency - try both CPU and CUDA if available
+            try:
+                # First try with CPU
+                latency_metrics = measure_inference_latency(model_copy, current_input_size, device='cpu')
+                
+                latency_results.append({
+                    'batch_size': batch_size,
+                    'device': 'cpu',
+                    **latency_metrics
+                })
+                
+                # Try with CUDA if available
+                if torch.cuda.is_available():
+                    cuda_latency_metrics = measure_inference_latency(model_copy, current_input_size, device='cuda')
+                    
+                    latency_results.append({
+                        'batch_size': batch_size,
+                        'device': 'cuda',
+                        **cuda_latency_metrics
+                    })
+            except Exception as e:
+                print(f"Error measuring latency for batch size {batch_size}: {e}")
+                latency_results.append({
+                    'batch_size': batch_size,
+                    'device': 'error',
+                    'mean_latency': 0,
+                    'throughput': 0,
+                    'error': str(e)
+                })
+        
+        # Create DataFrame
+        latency_df = pd.DataFrame(latency_results)
+        
+        # Save latency results to CSV
+        latency_csv = os.path.join(deployment_dir, f"{model_name}_latency.csv")
+        latency_df.to_csv(latency_csv, index=False)
+        
+        # Create summary DataFrame
+        summary_data = [{
+            'Model': model_name,
+            'Parameters': params,
+            'Model Size (MB)': model_size,
+            'ONNX Size (MB)': onnx_metrics.get('size_mb', 0),
+            'TorchScript Size (MB)': torchscript_metrics.get('size_mb', 0),
+            'Mean CPU Latency (ms)': latency_df[latency_df['device'] == 'cpu']['mean_latency'].mean() if not latency_df[latency_df['device'] == 'cpu'].empty else 0,
+            'Mean GPU Latency (ms)': latency_df[latency_df['device'] == 'cuda']['mean_latency'].mean() if not latency_df[latency_df['device'] == 'cuda'].empty else 0,
+            'Max CPU Throughput (samples/s)': latency_df[latency_df['device'] == 'cpu']['throughput'].max() if not latency_df[latency_df['device'] == 'cpu'].empty else 0,
+            'Max GPU Throughput (samples/s)': latency_df[latency_df['device'] == 'cuda']['throughput'].max() if not latency_df[latency_df['device'] == 'cuda'].empty else 0
+        }]
+        
+        summary_df = pd.DataFrame(summary_data)
+        
+        # Save summary to CSV
+        summary_csv = os.path.join(deployment_dir, f"{model_name}_deployment_metrics.csv")
+        summary_df.to_csv(summary_csv, index=False)
+        
+        # Create visualizations
+        # Visualize latency vs batch size for CPU and GPU
+        plt.figure(figsize=(12, 6))
+        
+        # Filter data for plotting
+        cpu_data = latency_df[latency_df['device'] == 'cpu']
+        cuda_data = latency_df[latency_df['device'] == 'cuda']
+        
+        if not cpu_data.empty:
+            plt.plot(cpu_data['batch_size'], cpu_data['mean_latency'], marker='o', label='CPU')
+        
+        if not cuda_data.empty:
+            plt.plot(cuda_data['batch_size'], cuda_data['mean_latency'], marker='s', label='GPU')
+        
+        plt.xlabel('Batch Size')
+        plt.ylabel('Mean Latency (ms)')
+        plt.title(f'Inference Latency vs Batch Size - {model_name}')
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.legend()
+        plt.tight_layout()
+        
+        # Save plot
+        plot_path = os.path.join(deployment_dir, f"{model_name}_latency_vs_batch_size")
+        latency_plot = save_figure(plt, plot_path, formats=['png', 'svg'])
+        
+        return summary_df, summary_csv, latency_plot
+    except Exception as e:
+        print(f"Error in benchmark_deployment_metrics: {e}")
+        # Return empty DataFrame
+        return pd.DataFrame(), "", ""
 
 
 def compare_deployment_metrics(

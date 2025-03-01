@@ -89,7 +89,7 @@ def calculate_layer_flops(
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
 ) -> pd.DataFrame:
     """
-    Calculate FLOPs for each layer in a PyTorch model.
+    Calculate FLOPs for each layer in the model.
     
     Args:
         model: PyTorch model
@@ -102,41 +102,52 @@ def calculate_layer_flops(
     model = model.to(device)
     model.eval()
     
-    # Get layer-wise complexity using ptflops
-    macs_dict, params_dict = get_model_complexity_info(
-        model, 
-        input_size[1:],  # Remove batch dimension
-        as_strings=False,
-        print_per_layer_stat=False,
-        verbose=False
-    )
-    
-    # Convert to DataFrame
-    layers = []
-    for layer_name, macs in macs_dict.items():
-        params = params_dict.get(layer_name, 0)
-        flops = macs * 2  # Multiply MACs by 2 to get FLOPs
+    try:
+        # Get layer-wise complexity using ptflops
+        macs_dict, params_dict = get_model_complexity_info(
+            model, 
+            input_size[1:],  # Remove batch dimension
+            as_strings=False,
+            print_per_layer_stat=False,
+            verbose=False
+        )
         
-        layers.append({
-            'layer_name': layer_name,
-            'flops': flops,
-            'params': params,
-            'flops_per_param': flops / params if params > 0 else 0
-        })
-    
-    df = pd.DataFrame(layers)
-    
-    # Calculate percentages
-    total_flops = df['flops'].sum()
-    total_params = df['params'].sum()
-    
-    df['flops_percentage'] = (df['flops'] / total_flops * 100) if total_flops > 0 else 0
-    df['params_percentage'] = (df['params'] / total_params * 100) if total_params > 0 else 0
-    
-    # Sort by FLOPs (descending)
-    df = df.sort_values('flops', ascending=False)
-    
-    return df
+        # Check if macs_dict is a dictionary
+        if not isinstance(macs_dict, dict):
+            print(f"Warning: Expected dictionary for MACs but got {type(macs_dict).__name__}")
+            # Create a single entry for total MACs
+            macs_dict = {"total": macs_dict}
+            params_dict = {"total": params_dict}
+        
+        # Convert to DataFrame
+        layers = []
+        for layer_name, macs in macs_dict.items():
+            params = params_dict.get(layer_name, 0)
+            flops = macs * 2  # Multiply MACs by 2 to get FLOPs
+            
+            layers.append({
+                'layer_name': layer_name,
+                'flops': flops,
+                'params': params,
+                'flops_per_param': flops / params if params > 0 else 0
+            })
+        
+        df = pd.DataFrame(layers)
+        
+        # Calculate percentages
+        total_flops = df['flops'].sum()
+        total_params = df['params'].sum()
+        
+        df['flops_percentage'] = (df['flops'] / total_flops * 100) if total_flops > 0 else 0
+        df['params_percentage'] = (df['params'] / total_params * 100) if total_params > 0 else 0
+        
+        # Sort by FLOPs (descending)
+        df = df.sort_values('flops', ascending=False)
+        
+        return df
+    except Exception as e:
+        print(f"Error in calculate_layer_flops: {e}")
+        return pd.DataFrame()
 
 
 def compare_model_flops(
@@ -270,88 +281,48 @@ def analyze_layer_distribution(
     Returns:
         DataFrame with layer-wise analysis, path to CSV file, and path to plot
     """
-    # Calculate layer-wise FLOPs
-    df = calculate_layer_flops(model, input_size)
-    
-    # Save to CSV
-    os.makedirs(output_dir, exist_ok=True)
-    csv_path = os.path.join(output_dir, f"{model_name}_layer_flops.csv")
-    df.to_csv(csv_path, index=False)
-    
-    # Create visualizations
-    
-    # 1. Top 10 layers by FLOPs
-    top_n = min(10, len(df))
-    top_layers = df.head(top_n)
-    
-    plt.figure(figsize=(12, 6))
-    plt.bar(top_layers['layer_name'], top_layers['flops_percentage'])
-    plt.xlabel('Layer')
-    plt.ylabel('FLOPs (%)')
-    plt.title(f'Top {top_n} Layers by Computational Cost')
-    plt.xticks(rotation=45, ha='right')
-    plt.grid(True, linestyle='--', alpha=0.7)
-    
-    # Add values on top of bars
-    for i, v in enumerate(top_layers['flops_percentage']):
-        plt.text(i, v * 1.01, f'{v:.2f}%', ha='center')
-    
-    plt.tight_layout()
-    
-    # Save figure
-    base_filename = os.path.join(output_dir, f"{model_name}_top_layers_flops")
-    top_png, top_svg = save_figure(plt, base_filename, formats=['png', 'svg'])
-    
-    # 2. Layer type distribution
-    # Extract layer types from names
-    df['layer_type'] = df['layer_name'].apply(lambda x: x.split('.')[-1])
-    
-    # Group by layer type
-    layer_type_df = df.groupby('layer_type').agg({
-        'flops': 'sum',
-        'params': 'sum'
-    }).reset_index()
-    
-    # Calculate percentages
-    total_flops = layer_type_df['flops'].sum()
-    total_params = layer_type_df['params'].sum()
-    
-    layer_type_df['flops_percentage'] = (layer_type_df['flops'] / total_flops * 100) if total_flops > 0 else 0
-    layer_type_df['params_percentage'] = (layer_type_df['params'] / total_params * 100) if total_params > 0 else 0
-    
-    # Sort by FLOPs (descending)
-    layer_type_df = layer_type_df.sort_values('flops', ascending=False)
-    
-    # Create pie chart
-    plt.figure(figsize=(10, 10))
-    
-    # Plot FLOPs distribution
-    plt.subplot(1, 2, 1)
-    plt.pie(
-        layer_type_df['flops_percentage'],
-        labels=layer_type_df['layer_type'],
-        autopct='%1.1f%%',
-        startangle=90
-    )
-    plt.title('FLOPs Distribution by Layer Type')
-    
-    # Plot Parameters distribution
-    plt.subplot(1, 2, 2)
-    plt.pie(
-        layer_type_df['params_percentage'],
-        labels=layer_type_df['layer_type'],
-        autopct='%1.1f%%',
-        startangle=90
-    )
-    plt.title('Parameters Distribution by Layer Type')
-    
-    plt.tight_layout()
-    
-    # Save figure
-    base_filename = os.path.join(output_dir, f"{model_name}_layer_type_distribution")
-    dist_png, dist_svg = save_figure(plt, base_filename, formats=['png', 'svg'])
-    
-    return df, csv_path, top_png
+    try:
+        # Calculate layer-wise FLOPs
+        df = calculate_layer_flops(model, input_size)
+        
+        # Check if we got a valid DataFrame
+        if df is None or len(df) == 0:
+            print(f"No layer-wise FLOPs data available for {model_name}")
+            return pd.DataFrame(), "", ""
+            
+        # Save to CSV
+        os.makedirs(output_dir, exist_ok=True)
+        csv_path = os.path.join(output_dir, f"{model_name}_layer_flops.csv")
+        df.to_csv(csv_path, index=False)
+        
+        # Create visualizations
+        
+        # 1. Top 10 layers by FLOPs
+        top_n = min(10, len(df))
+        top_layers = df.head(top_n)
+        
+        plt.figure(figsize=(12, 6))
+        plt.bar(top_layers['layer_name'], top_layers['flops_percentage'])
+        plt.xlabel('Layer')
+        plt.ylabel('FLOPs (%)')
+        plt.title(f'Top {top_n} Layers by Computational Cost')
+        plt.xticks(rotation=45, ha='right')
+        plt.grid(True, linestyle='--', alpha=0.7)
+        
+        # Add values on top of bars
+        for i, v in enumerate(top_layers['flops_percentage']):
+            plt.text(i, v * 1.01, f'{v:.2f}%', ha='center')
+        
+        plt.tight_layout()
+        
+        # Save plot
+        plot_path = os.path.join(output_dir, f"{model_name}_layer_distribution")
+        save_figure(plt, plot_path, formats=['png', 'svg'])
+        
+        return df, csv_path, plot_path
+    except Exception as e:
+        print(f"Error in analyze_layer_distribution: {e}")
+        return pd.DataFrame(), "", ""
 
 
 def calculate_theoretical_memory(

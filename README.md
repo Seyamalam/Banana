@@ -72,7 +72,6 @@ To train the custom model:
 python run_analysis.py --train --models banana_leaf_cnn
 ```
 
-
 '''bash
 python run_analysis.py --all --load_all_models --train --evaluate --ablation --robustness --deployment --batch_size 32 --epochs 2 --lr 0.001 --data_dir dataset --output_dir models --seed 42
 '''

@@ -237,8 +237,23 @@ def plot_confusion_matrix(cm, save_path=None, formats=None):
     
     class_names = [IDX_TO_CLASS[i] for i in range(NUM_CLASSES)]
     
-    # Normalize confusion matrix
-    cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+    # Ensure confusion matrix is a numpy array
+    if isinstance(cm, list):
+        cm = np.array(cm)
+    
+    # Check if confusion matrix is valid
+    if not isinstance(cm, np.ndarray) or cm.size == 0:
+        print("Warning: Invalid confusion matrix")
+        plt.close(fig)
+        return
+    
+    # Normalize confusion matrix with error handling
+    with np.errstate(divide='ignore', invalid='ignore'):
+        row_sums = cm.sum(axis=1)
+        cm_norm = np.zeros_like(cm, dtype=float)
+        for i, row_sum in enumerate(row_sums):
+            if row_sum > 0:
+                cm_norm[i] = cm[i] / row_sum
     
     # Plot
     sns.heatmap(cm_norm, annot=True, fmt='.2f', cmap='Blues',

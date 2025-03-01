@@ -21,7 +21,8 @@ class RobustnessTest:
         model_name: str,
         test_loader: torch.utils.data.DataLoader,
         device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
-        output_dir: str = 'models'
+        output_dir: str = 'models',
+        perturbations_to_test: List[str] = None
     ):
         """
         Initialize the robustness test.
@@ -32,12 +33,14 @@ class RobustnessTest:
             test_loader: DataLoader for test data
             device: Device to run on ('cuda' or 'cpu')
             output_dir: Directory to save results
+            perturbations_to_test: List of perturbation types to test (None = test all)
         """
         self.model = model.to(device)
         self.model_name = model_name
         self.test_loader = test_loader
         self.device = device
         self.output_dir = output_dir
+        self.perturbations_to_test = perturbations_to_test
         
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
@@ -47,6 +50,17 @@ class RobustnessTest:
         
         # Store results
         self.results = {}
+        
+        # Define perturbation handlers
+        self.perturbation_handlers = {
+            'gaussian_noise': self.test_gaussian_noise,
+            'blur': self.test_blur,
+            'brightness': self.test_brightness,
+            'contrast': self.test_contrast,
+            'rotation': self.test_rotation,
+            'occlusion': self.test_occlusion,
+            'jpeg_compression': self.test_jpeg_compression
+        }
         
     def _evaluate_with_transform(
         self, 
@@ -600,58 +614,91 @@ class RobustnessTest:
         base_filename = os.path.join(self.output_dir, f"{self.model_name}_{perturbation_type}_robustness")
         save_figure(plt, base_filename, formats=['png', 'svg'])
     
-    def run_all_tests(self) -> Dict[str, pd.DataFrame]:
+    def evaluate_clean_data(self):
+        """Evaluate model on clean data (no perturbations)."""
+        return self._evaluate_with_transform(lambda x: x, 'No Perturbation')
+
+    def run_all_tests(self) -> Dict[str, Any]:
         """
         Run all robustness tests.
         
         Returns:
-            Dictionary mapping test names to result DataFrames
+            Dictionary with test results for each perturbation type
         """
-        results = {}
+        # Start with baseline (clean data)
+        print("Running baseline evaluation...")
+        try:
+            baseline_results = self.evaluate_clean_data()
+            print(f"Baseline accuracy: {baseline_results['accuracy']:.4f}")
+            
+            # Store baseline results
+            self.results = {'baseline': baseline_results}
+            
+        except Exception as e:
+            print(f"Error in baseline evaluation: {e}")
+            self.results = {'baseline': {'accuracy': 0.0, 'error': str(e)}}
         
-        print("Testing robustness to Gaussian noise...")
-        results['gaussian_noise'] = self.test_gaussian_noise()
+        # Check if we are specifically testing only certain perturbations
+        perturbations_to_run = self.perturbations_to_test if self.perturbations_to_test else list(self.perturbation_handlers.keys())
         
-        print("Testing robustness to blur...")
-        results['blur'] = self.test_blur()
+        # Run tests for each perturbation type
+        for pert_type in perturbations_to_run:
+            if pert_type in self.perturbation_handlers:
+                print(f"Running robustness test: {pert_type}...")
+                try:
+                    # Call the handler function for this perturbation type
+                    results = self.perturbation_handlers[pert_type]()
+                    
+                    # Store the dataframe in results for this perturbation
+                    if isinstance(results, pd.DataFrame) and not results.empty:
+                        self.results[pert_type] = {
+                            'accuracy': results['accuracy'].min(),  # Use worst-case accuracy
+                            'dataframe': results
+                        }
+                    else:
+                        print(f"Warning: No valid results for {pert_type}")
+                        self.results[pert_type] = {'accuracy': 0.0, 'error': 'No valid results'}
+                    
+                except Exception as e:
+                    print(f"Error in {pert_type} test: {e}")
+                    self.results[pert_type] = {'accuracy': 0.0, 'error': str(e)}
         
-        print("Testing robustness to brightness changes...")
-        results['brightness'] = self.test_brightness()
+        # Save full summary report
+        try:
+            self._create_summary_visualization()
+        except Exception as e:
+            print(f"Error saving summary report: {e}")
         
-        print("Testing robustness to contrast changes...")
-        results['contrast'] = self.test_contrast()
-        
-        print("Testing robustness to rotation...")
-        results['rotation'] = self.test_rotation()
-        
-        print("Testing robustness to occlusion...")
-        results['occlusion'] = self.test_occlusion()
-        
-        print("Testing robustness to JPEG compression...")
-        results['jpeg_compression'] = self.test_jpeg_compression()
-        
-        # Create summary visualization
-        self._create_summary_visualization()
-        
-        return results
-    
+        return self.results
+
     def _create_summary_visualization(self) -> None:
         """Create summary visualization of all robustness tests."""
         # Extract baseline and worst-case accuracies for each test
         summary_data = []
         
-        for test_name, results in self.results.items():
-            baseline_acc = results[0]['accuracy']
-            worst_acc = min([r['accuracy'] for r in results])
-            acc_drop = baseline_acc - worst_acc
-            
-            summary_data.append({
-                'test': test_name.replace('_', ' ').title(),
-                'baseline_accuracy': baseline_acc,
-                'worst_accuracy': worst_acc,
-                'accuracy_drop': acc_drop,
-                'relative_drop': acc_drop / baseline_acc if baseline_acc > 0 else 0
-            })
+        # Get baseline accuracy
+        baseline_acc = 0.0
+        if 'baseline' in self.results and isinstance(self.results['baseline'], dict):
+            baseline_acc = self.results['baseline'].get('accuracy', 0.0)
+        
+        for test_name, test_result in self.results.items():
+            if test_name != 'baseline' and isinstance(test_result, dict):
+                # Get accuracy from the test result dictionary
+                test_acc = test_result.get('accuracy', 0.0)
+                acc_drop = baseline_acc - test_acc
+                
+                summary_data.append({
+                    'test': test_name.replace('_', ' ').title(),
+                    'baseline_accuracy': baseline_acc,
+                    'worst_accuracy': test_acc,
+                    'accuracy_drop': acc_drop,
+                    'relative_drop': acc_drop / baseline_acc if baseline_acc > 0 else 0
+                })
+        
+        # Only create visualization if we have data
+        if not summary_data:
+            print("Warning: No summary data available for visualization")
+            return
         
         # Convert to DataFrame
         summary_df = pd.DataFrame(summary_data)
