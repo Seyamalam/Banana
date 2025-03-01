@@ -313,13 +313,13 @@ def compare_classification_metrics(results, output_dir):
     
     for metric in metrics_to_plot:
         # Create figure
-        plt.figure(figsize=(12, 8))
+        fig, ax = plt.subplots(figsize=(12, 8))
         
         # Reshape data for bar chart
         pivot_df = metrics_df.pivot(index='Class', columns='Model', values=metric)
         
         # Create bar chart
-        ax = pivot_df.plot(kind='bar')
+        pivot_df.plot(kind='bar', ax=ax)
         
         plt.xlabel('Class')
         plt.ylabel(metric)
@@ -331,20 +331,22 @@ def compare_classification_metrics(results, output_dir):
         
         # Save figure
         metric_path = os.path.join(output_dir, f"comparison_{metric.lower().replace(' ', '_')}")
-        png_path, svg_path = save_figure(plt, metric_path, formats=['png', 'svg'])
+        png_path, svg_path = save_figure(fig, metric_path, formats=['png', 'svg'])
         all_paths[metric] = png_path
+        plt.close(fig)
     
     # Create heatmap showing F1 score for each model and class
-    plt.figure(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(12, 8))
     pivot_df = metrics_df.pivot(index='Class', columns='Model', values='F1 Score')
-    sns.heatmap(pivot_df, annot=True, cmap='Blues', fmt='.2f')
+    sns.heatmap(pivot_df, annot=True, cmap='Blues', fmt='.2f', ax=ax)
     plt.title('F1 Score by Class and Model')
     plt.tight_layout()
     
     # Save heatmap
     heatmap_path = os.path.join(output_dir, "f1_score_heatmap")
-    png_path, svg_path = save_figure(plt, heatmap_path, formats=['png', 'svg'])
+    png_path, svg_path = save_figure(fig, heatmap_path, formats=['png', 'svg'])
     all_paths['F1 Heatmap'] = png_path
+    plt.close(fig)
     
     # Create a spider plot for each class showing all metrics across models
     for class_name in class_names:
@@ -393,7 +395,8 @@ def compare_classification_metrics(results, output_dir):
         
         # Save figure
         class_path = os.path.join(output_dir, f"metrics_radar_{class_name.replace(' ', '_')}")
-        png_path, svg_path = save_figure(plt, class_path, formats=['png', 'svg'])
+        png_path, svg_path = save_figure(fig, class_path, formats=['png', 'svg'])
+        plt.close(fig)
     
     print(f"Classification metrics comparison saved to {output_dir}")
     
@@ -554,8 +557,8 @@ def evaluate_models(models, model_names, test_loader, args):
         
         # Create bar chart for each metric
         for metric in ['Accuracy', 'Precision', 'Recall', 'F1 Score']:
-            plt.figure(figsize=(10, 6))
-            plt.bar(overall_df['Model'], overall_df[metric])
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.bar(overall_df['Model'], overall_df[metric])
             plt.xlabel('Model')
             plt.ylabel(metric)
             plt.title(f'Comparison of {metric} Across Models')
@@ -564,7 +567,8 @@ def evaluate_models(models, model_names, test_loader, args):
             
             # Save figure
             metric_path = os.path.join(comparison_dir, f"overall_{metric.lower().replace(' ', '_')}")
-            save_figure(plt, metric_path, formats=['png', 'svg'])
+            save_figure(fig, metric_path, formats=['png', 'svg'])
+            plt.close(fig)
         
         print(f"Overall metrics comparison saved to {overall_csv}")
     else:
@@ -1202,7 +1206,7 @@ def save_comprehensive_comparison(models, model_names, evaluation_results, deplo
                 
                 # Save radar chart
                 radar_path = os.path.join(comparison_dir, "model_comparison_radar")
-                save_figure(plt, radar_path, formats=['png', 'svg'])
+                save_figure(fig, radar_path, formats=['png', 'svg'])
                 
                 print(f"Radar chart comparison saved to {radar_path}.png")
         except Exception as e:
@@ -1342,7 +1346,8 @@ def visualize_side_by_side_robustness(robustness_results, output_dir):
         if pert_data.empty:
             continue
             
-        plt.figure(figsize=(12, 6))
+        # Remove the unnecessary plt.figure() call that was causing the warning
+        # Only use plt.subplots() to create the figure
         
         # Set up bar positions
         x = np.arange(len(model_names))
@@ -1377,18 +1382,22 @@ def visualize_side_by_side_robustness(robustness_results, output_dir):
         
         # Save figure
         pert_path = os.path.join(output_dir, f"accuracy_under_{pert_type}")
-        save_figure(plt, pert_path, formats=['png', 'svg'])
+        save_figure(fig, pert_path, formats=['png', 'svg'])
+        # Close the figure explicitly to be safe (even though save_figure should do it)
+        plt.close(fig)
     
     # 3. Create heatmap for relative accuracy drop
-    plt.figure(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(12, 8))
     pivot_rel_df = comparison_df.pivot(index='Perturbation', columns='Model', values='Relative Drop (%)')
-    sns.heatmap(pivot_rel_df, annot=True, cmap='coolwarm_r', fmt='.2f')
+    sns.heatmap(pivot_rel_df, annot=True, cmap='coolwarm_r', fmt='.2f', ax=ax)
     plt.title('Relative Accuracy Drop (%) Under Different Perturbations')
     plt.tight_layout()
     
     # Save heatmap
     heatmap_path = os.path.join(output_dir, "relative_drop_heatmap")
-    heatmap_png, heatmap_svg = save_figure(plt, heatmap_path, formats=['png', 'svg'])
+    save_figure(fig, heatmap_path, formats=['png', 'svg'])
+    # Close the figure explicitly to be safe
+    plt.close(fig)
     
     print(f"Side-by-side robustness comparisons saved to {output_dir}")
     
@@ -1409,134 +1418,82 @@ def visualize_deployment_comparison(deployment_results, model_names, output_dir)
     # Ensure the output directory exists
     os.makedirs(output_dir, exist_ok=True)
     
-    # Create a combined dataframe for all models
-    combined_data = []
+    # Extract metrics for each model
+    latencies = []
+    throughputs = []
+    batch_sizes = []
     
-    try:
-        if not deployment_results:
-            print("⚠️ Warning: No deployment results to visualize")
-            # Create empty comparison file
-            empty_df = pd.DataFrame({'model': model_names})
-            empty_csv = os.path.join(output_dir, "deployment_metrics_all_models.csv")
-            empty_df.to_csv(empty_csv, index=False)
-            return empty_csv
-        
-        # Check columns in the first dataframe to determine structure
-        sample_df = deployment_results[0]
-        available_columns = sample_df.columns.tolist()
-        print(f"Available columns in deployment metrics: {available_columns}")
-        
-        # Create a simple combined dataframe with what we have
-        for i, (df, model_name) in enumerate(zip(deployment_results, model_names)):
-            df_copy = df.copy()
-            df_copy['model'] = model_name
-            combined_data.append(df_copy)
-        
-        # Concatenate and save what we have
-        combined_df = pd.concat(combined_data, ignore_index=True)
-        csv_path = os.path.join(output_dir, "deployment_metrics_all_models.csv")
-        combined_df.to_csv(csv_path, index=False)
-        
-        # Create visualizations for each numeric column
-        for col in available_columns:
-            if col != 'model' and pd.api.types.is_numeric_dtype(sample_df[col].dtype):
-                try:
-                    plt.figure(figsize=(10, 6))
-                    summary_data = []
-                    
-                    for df, model_name in zip(deployment_results, model_names):
-                        # Use mean value for each metric if column exists
-                        summary_data.append({
-                            'Model': model_name,
-                            col: df[col].mean() if col in df.columns else 0
-                        })
-                    
-                    summary_df = pd.DataFrame(summary_data)
-                    plt.bar(summary_df['Model'], summary_df[col])
-                    plt.xlabel('Model')
-                    plt.ylabel(col)
-                    plt.title(f'{col} Comparison Across Models')
-                    plt.xticks(rotation=45, ha='right')
-                    plt.grid(axis='y', alpha=0.3)
-                    plt.tight_layout()
-                    
-                    # Save figure
-                    metric_path = os.path.join(output_dir, f"{col.replace(' ', '_').lower()}_comparison")
-                    save_figure(plt, metric_path, formats=['png', 'svg'])
-                except Exception as e:
-                    print(f"⚠️ Warning: Could not create visualization for {col}: {e}")
-        
-        # Check for specific columns and create specialized visualizations when available
-        
-        # Latency visualization
-        latency_columns = [col for col in available_columns if 'latency' in col.lower() or 'time' in col.lower()]
-        if latency_columns:
-            latency_col = latency_columns[0]  # Use the first latency column found
-            plt.figure(figsize=(10, 6))
-            plt.bar(combined_df['model'], combined_df[latency_col])
-            plt.xlabel('Model')
-            plt.ylabel('Latency (ms)')
-            plt.title('Inference Latency Comparison')
-            plt.xticks(rotation=45, ha='right')
-            plt.grid(axis='y', alpha=0.3)
-            plt.tight_layout()
+    for result_df in deployment_results:
+        if "mean_latency" in result_df.columns:
+            latencies.append(result_df["mean_latency"].mean())
+        elif "Mean Latency (ms)" in result_df.columns:  # Backward compatibility
+            latencies.append(result_df["Mean Latency (ms)"].mean())
+        else:
+            latencies.append(np.nan)
             
-            # Save figure
-            latency_path = os.path.join(output_dir, "inference_latency_comparison")
-            save_figure(plt, latency_path, formats=['png', 'svg'])
+        if "throughput" in result_df.columns:
+            throughputs.append(result_df["throughput"].mean())
+        else:
+            throughputs.append(np.nan)
+            
+        if "batch_size" in result_df.columns:
+            batch_sizes.append(result_df["batch_size"].max())
+        else:
+            batch_sizes.append(1)  # Default to batch size of 1
+    
+    # 1. Latency Comparison
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.bar(model_names, latencies)
+    ax.set_xlabel('Model')
+    ax.set_ylabel('Mean Inference Latency (ms)')
+    ax.set_title('Inference Latency Comparison')
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    
+    # Save latency comparison
+    latency_path = os.path.join(output_dir, "latency_comparison")
+    save_figure(fig, latency_path, formats=['png', 'svg'])
+    plt.close(fig)
+    
+    # 2. Throughput Comparison (if available)
+    if not all(np.isnan(throughputs)):
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.bar(model_names, throughputs)
+        ax.set_xlabel('Model')
+        ax.set_ylabel('Throughput (images/second)')
+        ax.set_title('Throughput Comparison')
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
         
-        # Model size visualization
-        size_columns = [col for col in available_columns if 'size' in col.lower() and 'mb' in col.lower()]
-        if size_columns:
-            plt.figure(figsize=(12, 6))
-            
-            # For each model, plot a group of bars for different size metrics
-            x = np.arange(len(model_names))
-            width = 0.8 / len(size_columns)
-            
-            for i, col in enumerate(size_columns):
-                values = [df[col].iloc[0] if col in df.columns else 0 for df in deployment_results]
-                plt.bar(x + (i - len(size_columns)/2 + 0.5) * width, values, width, label=col)
-            
-            plt.xlabel('Model')
-            plt.ylabel('Size (MB)')
-            plt.title('Model Size Comparison by Format')
-            plt.xticks(x, model_names, rotation=45, ha='right')
-            plt.legend()
-            plt.grid(axis='y', alpha=0.3)
-            plt.tight_layout()
-            
-            # Save figure
-            size_path = os.path.join(output_dir, "model_size_comparison")
-            save_figure(plt, size_path, formats=['png', 'svg'])
-            
-        # Throughput visualization
-        throughput_columns = [col for col in available_columns if 'throughput' in col.lower() or 'img' in col.lower()]
-        if throughput_columns:
-            throughput_col = throughput_columns[0]  # Use the first throughput column found
-            plt.figure(figsize=(10, 6))
-            plt.bar(combined_df['model'], combined_df[throughput_col])
-            plt.xlabel('Model')
-            plt.ylabel('Throughput (images/second)')
-            plt.title('Maximum Throughput Comparison')
-            plt.xticks(rotation=45, ha='right')
-            plt.grid(axis='y', alpha=0.3)
-            plt.tight_layout()
-            
-            # Save figure
-            throughput_path = os.path.join(output_dir, "throughput_comparison")
-            save_figure(plt, throughput_path, formats=['png', 'svg'])
+        # Save throughput comparison
+        throughput_path = os.path.join(output_dir, "throughput_comparison")
+        save_figure(fig, throughput_path, formats=['png', 'svg'])
+        plt.close(fig)
+    
+    # 3. Batch Size Impact on Latency (if multiple batch sizes)
+    if len(set(batch_sizes)) > 1:
+        fig, ax = plt.subplots(figsize=(12, 6))
         
-        print(f"✅ Deployment metrics comparison saved to {output_dir}")
-        return csv_path
+        for i, (model, result) in enumerate(zip(model_names, deployment_results)):
+            if "batch_size" in result.columns and "mean_latency" in result.columns:
+                pivot_df = result.groupby("batch_size")["mean_latency"].mean().reset_index()
+                ax.plot(pivot_df["batch_size"], pivot_df["mean_latency"], marker='o', label=model)
+            
+        ax.set_xlabel('Batch Size')
+        ax.set_ylabel('Mean Inference Latency (ms)')
+        ax.set_title('Impact of Batch Size on Inference Latency')
+        ax.legend()
+        plt.grid(alpha=0.3)
+        plt.tight_layout()
         
-    except Exception as e:
-        print(f"⚠️ Warning: Error generating deployment comparison visualizations: {e}")
-        # Create a basic CSV with model names
-        empty_df = pd.DataFrame({'model': model_names})
-        error_csv = os.path.join(output_dir, "deployment_metrics_error.csv")
-        empty_df.to_csv(error_csv, index=False)
-        return error_csv
+        # Save batch size impact visualization
+        batch_impact_path = os.path.join(output_dir, "batch_size_impact")
+        save_figure(fig, batch_impact_path, formats=['png', 'svg'])
+        plt.close(fig)
+    
+    print(f"Deployment metrics visualizations saved to {output_dir}")
+    
+    return output_dir
 
 
 def visualize_efficiency_comparison(models, model_names, evaluation_results, output_dir):
@@ -1749,7 +1706,7 @@ def visualize_efficiency_comparison(models, model_names, evaluation_results, out
             
             # Save radar chart
             radar_path = os.path.join(output_dir, "efficiency_radar")
-            radar_png, radar_svg = save_figure(plt, radar_path, formats=['png', 'svg'])
+            radar_png, radar_svg = save_figure(fig, radar_path, formats=['png', 'svg'])
         except Exception as e:
             print(f"Warning: Could not generate efficiency radar chart: {e}")
     
@@ -1781,6 +1738,114 @@ def check_disk_space(min_space_mb=100):
     except Exception as e:
         print(f"⚠️ Warning: Could not check disk space: {e}")
         return True  # Assume there's enough space if check fails
+
+
+def visualize_flops_comparison(flops_data, model_names, output_dir):
+    """
+    Create visualizations comparing FLOPs and parameters across models.
+    
+    Args:
+        flops_data: List of dictionaries with FLOPs results for each model
+        model_names: List of model names
+        output_dir: Directory to save visualizations
+    """
+    print("\n📊 Creating FLOPs comparison visualizations...")
+    
+    # Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Extract metrics for comparison
+    total_flops = []
+    total_params = []
+    param_sizes = []
+    
+    for data in flops_data:
+        if data is not None:
+            total_flops.append(data.get('total_flops', 0) / 1e6)  # Convert to MFLOPs
+            total_params.append(data.get('total_params', 0) / 1e6)  # Convert to millions
+            param_sizes.append(data.get('param_size_mb', 0))
+        else:
+            total_flops.append(0)
+            total_params.append(0)
+            param_sizes.append(0)
+    
+    # Create a dataframe for easy CSV export
+    metrics_df = pd.DataFrame({
+        'Model': model_names,
+        'Total FLOPs (M)': total_flops,
+        'Total Parameters (M)': total_params,
+        'Parameter Size (MB)': param_sizes
+    })
+    
+    # Save as CSV
+    csv_path = os.path.join(output_dir, "flops_params_comparison.csv")
+    metrics_df.to_csv(csv_path, index=False)
+    
+    # 1. Total FLOPs comparison
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.bar(model_names, total_flops)
+    ax.set_xlabel('Model')
+    ax.set_ylabel('Total FLOPs (MFLOPs)')
+    ax.set_title('Total FLOPs Comparison')
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    
+    # Save figure
+    flops_path = os.path.join(output_dir, "total_flops_comparison")
+    save_figure(fig, flops_path, formats=['png', 'svg'])
+    plt.close(fig)
+    
+    # 2. Total parameters comparison
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.bar(model_names, total_params)
+    ax.set_xlabel('Model')
+    ax.set_ylabel('Total Parameters (millions)')
+    ax.set_title('Total Parameters Comparison')
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    
+    # Save figure
+    params_path = os.path.join(output_dir, "total_params_comparison")
+    save_figure(fig, params_path, formats=['png', 'svg'])
+    plt.close(fig)
+    
+    # 3. Parameter size comparison
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.bar(model_names, param_sizes)
+    ax.set_xlabel('Model')
+    ax.set_ylabel('Parameter Size (MB)')
+    ax.set_title('Parameter Size Comparison')
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    
+    # Save figure
+    size_path = os.path.join(output_dir, "param_size_comparison")
+    save_figure(fig, size_path, formats=['png', 'svg'])
+    plt.close(fig)
+    
+    # 4. Combined FLOPs vs Parameters visualization
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.scatter(total_params, total_flops, s=100)
+    
+    # Add model labels
+    for i, model in enumerate(model_names):
+        ax.annotate(model, (total_params[i], total_flops[i]), 
+                   textcoords="offset points", xytext=(0,10), ha='center')
+    
+    ax.set_xlabel('Total Parameters (millions)')
+    ax.set_ylabel('Total FLOPs (MFLOPs)')
+    ax.set_title('FLOPs vs Parameters')
+    ax.grid(alpha=0.3)
+    plt.tight_layout()
+    
+    # Save figure
+    scatter_path = os.path.join(output_dir, "flops_vs_params")
+    save_figure(fig, scatter_path, formats=['png', 'svg'])
+    plt.close(fig)
+    
+    print(f"FLOPs comparison visualizations saved to {output_dir}")
+    
+    return csv_path
 
 
 def main():
