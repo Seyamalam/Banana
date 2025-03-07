@@ -1,0 +1,2 @@
+Model,Parameters,Model Size (MB),ONNX Size (MB),TorchScript Size (MB),Mean CPU Latency (ms),Mean GPU Latency (ms),Max CPU Throughput (samples/s),Max GPU Throughput (samples/s)
+vgg16,134289223,512.2843341827393,512.2812662124634,512.3419389724731,783.8971567153931,24.252790451049805,18.040179177952833,530.7614443963008

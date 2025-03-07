@@ -1,0 +1,4 @@
+ModelAdapter(resnet50) - Parameters: 23,522,375 (trainable: 23,522,375)
+
+Total parameters: 23,522,375
+Trainable parameters: 23,522,375

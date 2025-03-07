@@ -1,0 +1,7 @@
+Metric,Value
+model_name,mobilenet_v3_large
+training_time_seconds,69.55577731132507
+peak_memory_mb,1609.11328125
+avg_memory_mb,1586.9812613224638
+peak_gpu_memory_mb,2189.61865234375
+avg_gpu_memory_mb,1054.0823496942935

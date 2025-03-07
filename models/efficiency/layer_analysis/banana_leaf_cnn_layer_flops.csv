@@ -1,0 +1,2 @@
+layer_name,flops,params,flops_per_param,flops_percentage,params_percentage
+total,888378254,205191,4329.518614364178,100.0,100.0

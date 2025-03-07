@@ -20,7 +20,6 @@ node_modules
 *.pyw
 *.pyz
 *.pywz
-*.csv
 *.json
 *.jsonl
 *.jsonl.gz
@@ -28,15 +27,12 @@ node_modules
 *.jsonl.xz
 *.jsonl.lzma
 
-*.png
 *.jpg
 *.jpeg
 *.gif
 *.bmp
 *.tiff
 *.ico
-*.txt
-*.md
 *.rst
 *.tex
 *.log

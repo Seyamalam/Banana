@@ -1,0 +1,2 @@
+Model,Parameters,Model Size (MB),ONNX Size (MB),TorchScript Size (MB),Mean CPU Latency (ms),Mean GPU Latency (ms),Max CPU Throughput (samples/s),Max GPU Throughput (samples/s)
+densenet121,6961031,27.139546394348145,26.942415237426758,27.728768348693848,343.7624282836914,23.241031169891357,54.46674474212924,898.1598987234297

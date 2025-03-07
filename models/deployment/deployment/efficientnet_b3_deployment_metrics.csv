@@ -1,0 +1,2 @@
+Model,Parameters,Model Size (MB),ONNX Size (MB),TorchScript Size (MB),Mean CPU Latency (ms),Mean GPU Latency (ms),Max CPU Throughput (samples/s),Max GPU Throughput (samples/s)
+efficientnet_b3,10706991,41.381160736083984,40.80038356781006,42.074612617492676,306.93660020828247,19.035058975219727,65.12649679934387,1036.0119272293891

@@ -1,0 +1,2 @@
+Model,Parameters,Model Size (MB),ONNX Size (MB),TorchScript Size (MB),Mean CPU Latency (ms),Mean GPU Latency (ms),Max CPU Throughput (samples/s),Max GPU Throughput (samples/s)
+banana_leaf_cnn,205191,0.7994098663330078,0.7838582992553711,0.8312692642211914,115.23496103286743,3.392439842224121,250.37418348130694,3831.018128426624

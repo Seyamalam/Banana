@@ -1,0 +1,2 @@
+Model,Parameters,Model Size (MB),ONNX Size (MB),TorchScript Size (MB),Mean CPU Latency (ms),Mean GPU Latency (ms),Max CPU Throughput (samples/s),Max GPU Throughput (samples/s)
+resnet50,23522375,90.03722953796387,89.65499782562256,90.2429428100586,368.56851148605347,14.288042068481445,42.656354489497446,984.8839403010221

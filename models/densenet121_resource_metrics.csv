@@ -1,0 +1,7 @@
+Metric,Value
+model_name,densenet121
+training_time_seconds,116.74762916564941
+peak_memory_mb,1734.28125
+avg_memory_mb,1712.6686422413793
+peak_gpu_memory_mb,4901.62744140625
+avg_gpu_memory_mb,1510.5332999393859

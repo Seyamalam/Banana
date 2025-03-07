@@ -1,0 +1,7 @@
+Metric,Value
+model_name,vgg16
+training_time_seconds,206.34586238861084
+peak_memory_mb,2143.8984375
+avg_memory_mb,1762.5361379253927
+peak_gpu_memory_mb,4649.5458984375
+avg_gpu_memory_mb,2467.7417810250327

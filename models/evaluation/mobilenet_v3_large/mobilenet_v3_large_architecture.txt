@@ -1,0 +1,4 @@
+ModelAdapter(mobilenet_v3_large) - Parameters: 4,210,999 (trainable: 4,210,999)
+
+Total parameters: 4,210,999
+Trainable parameters: 4,210,999

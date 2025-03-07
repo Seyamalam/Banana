@@ -1,0 +1,4 @@
+ModelAdapter(efficientnet_b3) - Parameters: 10,706,991 (trainable: 10,706,991)
+
+Total parameters: 10,706,991
+Trainable parameters: 10,706,991

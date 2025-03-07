@@ -1,0 +1,4 @@
+ModelAdapter(densenet121) - Parameters: 6,961,031 (trainable: 6,961,031)
+
+Total parameters: 6,961,031
+Trainable parameters: 6,961,031

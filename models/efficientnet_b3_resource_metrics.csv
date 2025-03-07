@@ -1,0 +1,7 @@
+Metric,Value
+model_name,efficientnet_b3
+training_time_seconds,112.74013328552246
+peak_memory_mb,1708.93359375
+avg_memory_mb,1637.0751953125
+peak_gpu_memory_mb,6114.6259765625
+avg_gpu_memory_mb,1870.6934334891182

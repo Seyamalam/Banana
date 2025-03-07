@@ -1,0 +1,7 @@
+Metric,Value
+model_name,banana_leaf_cnn
+training_time_seconds,64.58012795448303
+peak_memory_mb,1409.0703125
+avg_memory_mb,1321.3602294921875
+peak_gpu_memory_mb,1625.6181640625
+avg_gpu_memory_mb,747.1170501708984

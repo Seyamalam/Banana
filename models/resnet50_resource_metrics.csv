@@ -1,0 +1,7 @@
+Metric,Value
+model_name,resnet50
+training_time_seconds,101.71012806892395
+peak_memory_mb,1517.109375
+avg_memory_mb,1502.6296024133662
+peak_gpu_memory_mb,3511.12109375
+avg_gpu_memory_mb,1312.3732982673268

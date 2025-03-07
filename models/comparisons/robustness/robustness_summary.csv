@@ -1,0 +1,43 @@
+Model,Perturbation,Accuracy Drop
+banana_leaf_cnn,Gaussian Noise,0.5324675324675325
+banana_leaf_cnn,Blur,0.6363636363636365
+banana_leaf_cnn,Brightness,0.6363636363636365
+banana_leaf_cnn,Contrast,0.6363636363636365
+banana_leaf_cnn,Rotation,0.5974025974025974
+banana_leaf_cnn,Occlusion,0.051948051948051965
+banana_leaf_cnn,Jpeg Compression,0.6233766233766234
+resnet50,Gaussian Noise,0.6363636363636364
+resnet50,Blur,0.7142857142857142
+resnet50,Brightness,0.7142857142857142
+resnet50,Contrast,0.7142857142857142
+resnet50,Rotation,0.7012987012987013
+resnet50,Occlusion,0.0
+resnet50,Jpeg Compression,0.7012987012987013
+mobilenet_v3_large,Gaussian Noise,0.3896103896103896
+mobilenet_v3_large,Blur,0.7142857142857142
+mobilenet_v3_large,Brightness,0.7402597402597402
+mobilenet_v3_large,Contrast,0.7532467532467532
+mobilenet_v3_large,Rotation,0.6753246753246753
+mobilenet_v3_large,Occlusion,0.0
+mobilenet_v3_large,Jpeg Compression,0.6103896103896104
+efficientnet_b3,Gaussian Noise,0.5714285714285714
+efficientnet_b3,Blur,0.8441558441558441
+efficientnet_b3,Brightness,0.6233766233766234
+efficientnet_b3,Contrast,0.5324675324675325
+efficientnet_b3,Rotation,0.6363636363636364
+efficientnet_b3,Occlusion,0.0
+efficientnet_b3,Jpeg Compression,0.7792207792207793
+densenet121,Gaussian Noise,0.3246753246753247
+densenet121,Blur,0.8311688311688311
+densenet121,Brightness,0.8441558441558441
+densenet121,Contrast,0.8311688311688311
+densenet121,Rotation,0.8311688311688311
+densenet121,Occlusion,0.0
+densenet121,Jpeg Compression,0.7662337662337662
+vgg16,Gaussian Noise,0.5844155844155845
+vgg16,Blur,0.6753246753246753
+vgg16,Brightness,0.6103896103896105
+vgg16,Contrast,0.6233766233766234
+vgg16,Rotation,0.6363636363636365
+vgg16,Occlusion,0.19480519480519487
+vgg16,Jpeg Compression,0.6493506493506493

@@ -1,0 +1,4 @@
+ModelAdapter(vgg16) - Parameters: 134,289,223 (trainable: 134,289,223)
+
+Total parameters: 134,289,223
+Trainable parameters: 134,289,223

@@ -1,0 +1,8 @@
+class,precision,recall,f1_score,support
+banana_healthy_leaf,1.0,1.0,1.0,11
+black_sigatoka,0.85,1.0,0.92,11
+yellow_sigatoka,1.0,1.0,1.0,11
+panama_disease,1.0,0.45,0.62,11
+moko_disease,0.92,1.0,0.96,11
+insect_pest,1.0,0.82,0.9,11
+bract_mosaic_virus,0.69,1.0,0.81,11

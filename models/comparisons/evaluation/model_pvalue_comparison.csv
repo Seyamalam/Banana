@@ -1,0 +1,7 @@
+,banana_leaf_cnn,resnet50,mobilenet_v3_large,efficientnet_b3,densenet121,vgg16
+banana_leaf_cnn,1.0,0.994,0.961,1.0,1.0,0.171
+resnet50,0.011,1.0,0.207,0.557,0.999,0.001
+mobilenet_v3_large,0.061,0.852,1.0,0.846,1.0,0.004
+efficientnet_b3,0.004,0.547,0.21,1.0,0.998,0.001
+densenet121,0.0,0.008,0.0,0.005,1.0,0.0
+vgg16,0.874,1.0,0.998,1.0,1.0,1.0

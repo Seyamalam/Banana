@@ -1,0 +1,29 @@
+name,model,accuracy,inference_time,training_time,model_size,pareto_optimal
+banana_leaf_cnn,"BananaLeafCNN(
+  (conv1): Conv2d(3, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (bn1): BatchNorm2d(32, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+  (pool1): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+  (conv2): Conv2d(32, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (bn2): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+  (pool2): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+  (conv3): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (bn3): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+  (pool3): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+  (conv4): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (bn4): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+  (pool4): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+  (conv5): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (bn5): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+  (pool5): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+  (conv6): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  (bn6): BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+  (pool6): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+  (fc1): Linear(in_features=576, out_features=64, bias=True)
+  (dropout): Dropout(p=0.5, inplace=False)
+  (fc2): Linear(in_features=64, out_features=7, bias=True)
+)",0.7402597402597403,0.01,300,0.7994098663330078,True
+resnet50,"ModelAdapter(resnet50) - Parameters: 23,522,375 (trainable: 23,522,375)",0.8961038961038961,0.01,300,90.03722953796387,False
+mobilenet_v3_large,"ModelAdapter(mobilenet_v3_large) - Parameters: 4,210,999 (trainable: 4,210,999)",0.8441558441558441,0.01,300,16.263418197631836,True
+efficientnet_b3,"ModelAdapter(efficientnet_b3) - Parameters: 10,706,991 (trainable: 10,706,991)",0.8961038961038961,0.01,300,41.381160736083984,False
+densenet121,"ModelAdapter(densenet121) - Parameters: 6,961,031 (trainable: 6,961,031)",0.987012987012987,0.01,300,27.139546394348145,True
+vgg16,"ModelAdapter(vgg16) - Parameters: 134,289,223 (trainable: 134,289,223)",0.6623376623376623,0.01,300,512.2843341827393,False

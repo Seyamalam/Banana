@@ -1,0 +1,2 @@
+Model,Parameters,Model Size (MB),ONNX Size (MB),TorchScript Size (MB),Mean CPU Latency (ms),Mean GPU Latency (ms),Max CPU Throughput (samples/s),Max GPU Throughput (samples/s)
+mobilenet_v3_large,4210999,16.263418197631836,16.057074546813965,16.59809684753418,71.56609678268433,7.818646430969238,246.58237872137727,3479.3543150608407
