@@ -11,7 +11,8 @@
 *.pt.tar.bz2
 *.pt.tar.xz
 *.pt.tar.lzma
-*.pt.tar.lzma
+*.pt.tar.lzma   
+node_modules
 
 *.pyc
 *.pyo
